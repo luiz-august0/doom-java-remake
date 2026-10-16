@@ -1,0 +1,19 @@
+# Keep LF everywhere (Windows runners default to core.autocrlf=true, which turns ./mvnw and the shell scripts
+# into CRLF and breaks bash, and changes text test resources that are compared byte for byte).
+* text=auto eol=lf
+
+# Windows batch files need CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary data.
+*.wad binary
+*.WAD binary
+*.lmp binary
+*.gz binary
+*.bin binary
+*.raw binary
+*.png binary
+*.jar binary
+*.zip binary
+*.pdf binary
