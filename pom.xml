@@ -77,6 +77,8 @@
     <dist.app.vendor>doom-java</dist.app.vendor>
     <!-- Overridden per OS below. app-image works everywhere; dmg (macOS), msi/exe (Windows, needs WiX), deb/rpm (Linux). -->
     <dist.jpackage.type>app-image</dist.jpackage.type>
+    <dist.jpackage.extra.opt>--description</dist.jpackage.extra.opt>
+    <dist.jpackage.extra.val>${project.description}</dist.jpackage.extra.val>
     <dist.jpackage.exe>${java.home}/bin/jpackage</dist.jpackage.exe>
     <!-- true skips the portable zips of the dist profile (doom-app/src/dist/make-portable.sh). -->
     <dist.portable.skip>false</dist.portable.skip>
@@ -317,6 +319,8 @@
         <lwjgl.natives>natives-macos-arm64</lwjgl.natives>
         <dist.jpackage.type>dmg</dist.jpackage.type>
         <dist.jvm.first.thread>-XstartOnFirstThread</dist.jvm.first.thread>
+        <dist.jpackage.extra.opt>--license-file</dist.jpackage.extra.opt>
+        <dist.jpackage.extra.val>${project.basedir}/../LICENSE</dist.jpackage.extra.val>
       </properties>
     </profile>
     <profile>
@@ -326,6 +330,8 @@
         <lwjgl.natives>natives-macos</lwjgl.natives>
         <dist.jpackage.type>dmg</dist.jpackage.type>
         <dist.jvm.first.thread>-XstartOnFirstThread</dist.jvm.first.thread>
+        <dist.jpackage.extra.opt>--license-file</dist.jpackage.extra.opt>
+        <dist.jpackage.extra.val>${project.basedir}/../LICENSE</dist.jpackage.extra.val>
       </properties>
     </profile>
     <profile>
@@ -334,6 +340,8 @@
       <properties>
         <lwjgl.natives>natives-windows</lwjgl.natives>
         <dist.jpackage.exe>${java.home}/bin/jpackage.exe</dist.jpackage.exe>
+        <dist.jpackage.extra.opt>--license-file</dist.jpackage.extra.opt>
+        <dist.jpackage.extra.val>${project.basedir}/../LICENSE</dist.jpackage.extra.val>
       </properties>
     </profile>
     <profile>
@@ -342,6 +350,8 @@
       <properties>
         <lwjgl.natives>natives-windows-arm64</lwjgl.natives>
         <dist.jpackage.exe>${java.home}/bin/jpackage.exe</dist.jpackage.exe>
+        <dist.jpackage.extra.opt>--license-file</dist.jpackage.extra.opt>
+        <dist.jpackage.extra.val>${project.basedir}/../LICENSE</dist.jpackage.extra.val>
       </properties>
     </profile>
     <profile>

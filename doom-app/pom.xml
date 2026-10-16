@@ -229,8 +229,10 @@
                     <argument>--enable-native-access=org.lwjgl,org.lwjgl.glfw,org.lwjgl.opengl</argument>
                     <argument>--app-content</argument>
                     <argument>${project.build.directory}/dist/app-content/iwads</argument>
-                    <argument>--license-file</argument>
-                    <argument>${project.basedir}/../LICENSE</argument>
+                    <!-- The license file only for installer types (dmg, msi): app-image rejects it, so Linux repeats
+                         an option that is valid everywhere (jpackage accepts repeated options). -->
+                    <argument>${dist.jpackage.extra.opt}</argument>
+                    <argument>${dist.jpackage.extra.val}</argument>
                     <argument>--dest</argument>
                     <argument>${project.build.directory}/dist/installer</argument>
                   </arguments>
