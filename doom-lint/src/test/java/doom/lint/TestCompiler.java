@@ -144,7 +144,7 @@ final class TestCompiler {
             int status = p.waitFor();
             // -XDrawDiagnostics lines: "O.java:6:31: compiler.err.proc.messager: [BamLint] ..."
             List<Message> messages = new ArrayList<>();
-            for (String line : output.split("\n")) {
+            for (String line : output.split("\r?\n")) {
                 java.util.regex.Matcher m = java.util.regex.Pattern
                         .compile("^(\\S+?):(\\d+):\\d+: compiler\\.(err|warn)\\.[a-z.]+: (.*)$").matcher(line.strip());
                 if (m.matches()) {

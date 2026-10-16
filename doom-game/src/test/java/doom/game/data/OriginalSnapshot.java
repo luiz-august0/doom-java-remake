@@ -51,7 +51,7 @@ final class OriginalSnapshot {
                 throw new IllegalStateException("original-defs.txt not found");
             }
             OriginalSnapshot s = new OriginalSnapshot();
-            for (String line : new String(in.readAllBytes(), StandardCharsets.UTF_8).split("\n")) {
+            for (String line : new String(in.readAllBytes(), StandardCharsets.UTF_8).split("\r?\n")) {
                 if (!line.isEmpty() && line.charAt(0) != '#') {
                     s.parse(line.split("\t", -1));
                 }

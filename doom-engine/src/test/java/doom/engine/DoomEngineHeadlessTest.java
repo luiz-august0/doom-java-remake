@@ -350,7 +350,7 @@ class DoomEngineHeadlessTest {
 
     private static List<String> readGzip(Path file) throws Exception {
         try (var in = new GZIPInputStream(Files.newInputStream(file))) {
-            return List.of(new String(in.readAllBytes(), StandardCharsets.UTF_8).split("\n"));
+            return List.of(new String(in.readAllBytes(), StandardCharsets.UTF_8).split("\r?\n"));
         }
     }
 }
