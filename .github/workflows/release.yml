@@ -67,7 +67,10 @@ jobs:
           if [ "${{ matrix.jpackage-type }}" = "app-image" ]; then
             tar -C doom-app/target/dist/installer -czf "out/DoomJava-${{ steps.version.outputs.value }}-${{ matrix.name }}.tar.gz" .
           else
-            cp doom-app/target/dist/installer/*.* out/
+            for f in doom-app/target/dist/installer/*.*; do
+              ext="${f##*.}"
+              cp "$f" "out/DoomJava-${{ steps.version.outputs.value }}-${{ matrix.name }}.${ext}"
+            done
           fi
           cp doom-app/target/dist/portable/*.zip out/
           ls -l out
