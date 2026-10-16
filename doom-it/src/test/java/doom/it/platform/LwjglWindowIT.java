@@ -14,7 +14,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Opens a real window through the LWJGL backend, presents a two-colour frame (row- and column-major) and checks the
  * read-back. Skipped when the backend is not usable in this JVM (no display, or macOS without -XstartOnFirstThread,
- * which Failsafe does not pass): {@code bin/viewer --glshot} covers that case.
+ * which Failsafe does not pass, or no OpenGL 3.3 driver as on GPU-less CI runners): {@code bin/viewer --glshot}
+ * covers that case.
  */
 class LwjglWindowIT {
 
@@ -30,8 +31,13 @@ class LwjglWindowIT {
         }
         assumeTrue(provider != null && provider.isSupported(), "lwjgl backend not usable here");
         try (VideoSink video = provider.createVideoSink()) {
-            video.open(new VideoConfig("it", WindowMode.WINDOWED, 320, 240, false, 0, ScaleMode.STRETCH,
-                    ScaleFilter.NEAREST, 1.0));
+            try {
+                video.open(new VideoConfig("it", WindowMode.WINDOWED, 320, 240, false, 0, ScaleMode.STRETCH,
+                        ScaleFilter.NEAREST, 1.0));
+            } catch (IllegalStateException e) {
+                // CI runners without a GPU (e.g. Windows Server) have no OpenGL 3.3 core context
+                assumeTrue(false, "no OpenGL 3.3 core context available: " + e.getMessage());
+            }
             byte[] pal = new byte[768];
             pal[3] = (byte) 255; // index 1 = red
             pal[8] = (byte) 255; // index 2 = blue
