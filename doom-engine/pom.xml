@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>dev.doomjava</groupId>
+    <artifactId>doom-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>doom-engine</artifactId>
+  <name>doom-engine</name>
+  <description>Main loop, ticcmd building, configuration and command line.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>dev.doomjava</groupId>
+      <artifactId>doom-math</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.doomjava</groupId>
+      <artifactId>doom-wad</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.doomjava</groupId>
+      <artifactId>doom-game</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.doomjava</groupId>
+      <artifactId>doom-platform-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.doomjava</groupId>
+      <artifactId>doom-render</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.doomjava</groupId>
+      <artifactId>doom-sound</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.doomjava</groupId>
+      <artifactId>doom-ui</artifactId>
+    </dependency>
+  </dependencies>
+</project>

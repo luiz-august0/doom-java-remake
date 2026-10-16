@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Developer tools: bin/doom-tools <command> [args...]   (wad-dump, trace-diff, gen-demo, demo-suite, demo-run, ...)
+# Environment: DOOM_NO_BUILD=1 skips the Maven step (uses the classpath cached by the last run);
+#              DOOM_IWAD_DIR names the directory with the IWADs; DOOM_JVM_OPTS adds JVM options.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CP_FILE="$ROOT/doom-tools/target/tools-classpath.txt"
+
+if [[ "${DOOM_NO_BUILD:-}" != "1" || ! -f "$CP_FILE" ]]; then
+  mkdir -p "$ROOT/doom-tools/target"
+  (cd "$ROOT" && ./mvnw -o -q -pl doom-tools -am compile dependency:build-classpath \
+      -Dmdep.outputFile="$CP_FILE" -Dmdep.includeScope=runtime)
+fi
+
+# Module path: reactor output directories + runtime dependencies, without test-only libraries.
+MODULE_PATH="$ROOT/doom-tools/target/classes"
+IFS=':' read -r -a ENTRIES < "$CP_FILE" || true  # the file has no trailing newline
+for e in "${ENTRIES[@]}"; do
+  case "$e" in
+    *junit*|*assertj*|*opentest4j*|*apiguardian*|*byte-buddy*) ;;
+    *) MODULE_PATH="$MODULE_PATH:$e" ;;
+  esac
+done
+
+# shellcheck disable=SC2086
+exec java ${DOOM_JVM_OPTS:-} --module-path "$MODULE_PATH" -m doom.tools/doom.tools.Main "$@"

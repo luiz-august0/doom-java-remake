@@ -1,0 +1,17 @@
+# docker compose up            builds the image locally and serves the game on http://localhost:6080
+# docker compose run --rm --service-ports doom -iwad freedoom2.wad -warp 1     (extra game options)
+services:
+  doom:
+    build: .
+    image: doom-java
+    ports:
+      - "6080:6080"
+    environment:
+      DOOM_MODE: browser
+      DOOM_GEOMETRY: 1280x800
+    volumes:
+      # configuration (doom-java.cfg), save games, screenshots and logs survive container restarts
+      - doom-data:/home/doom/.config/doom-java
+
+volumes:
+  doom-data:

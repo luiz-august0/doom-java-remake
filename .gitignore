@@ -1,0 +1,37 @@
+# Build output
+target/
+*.class
+
+# Game data: the freely redistributable IWADs live in .iwads/ and are committed (ADR-023).
+# Any other WAD (commercial IWADs, PWADs, generated test WADs) stays out of git.
+*.wad
+*.WAD
+!/.iwads/
+!/.iwads/doom1.wad
+!/.iwads/freedoom1.wad
+!/.iwads/freedoom2.wad
+!/.iwads/freedm.wad
+# Commercial IWADs a user may drop next to the free ones
+/.iwads/doom.wad
+/.iwads/doom2.wad
+/.iwads/plutonia.wad
+/.iwads/tnt.wad
+
+# Local tool workspaces (oracle build, reference frames, caches)
+tools/*/work/
+.cache/
+
+# Benchmark and run artifacts
+bench-results/
+*.trace
+*.log
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Claude Code local state
+.claude/worktrees/
+.claude/settings.local.json

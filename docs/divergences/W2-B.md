@@ -1,0 +1,24 @@
+# W2-B divergences
+
+| area | original behaviour | ours | reason | reference |
+|---|---|---|---|---|
+| Wipe RNG draws | contracts §8 / task brief say 160 draws | `Wipe` draws **320** (`y[0]` + 319 columns), exactly as `wipe_initMelt` loops `i < width` with `width = SCREENWIDTH = 320`; only the first 160 values drive strips at 320x200 | the oracle trace confirms it: the misc index jumps by 65 = 1 (`ST_Ticker`) + 64 at the first wipe, and 320 mod 256 = 64 (160 draws would give 161); contract §8 needs correcting | `f_wipe.c:wipe_initMelt`, `testdata/traces/doom1-demo1.trace.gz` |
+| Wipe resolution | 2-pixel strips of 320x200 | state kept in 320x200 virtual units (identical timing at every size); strips are `2·s` px wide, mapped centred; widescreen strips outside the 4:3 area reuse the other random-walk values of the same 320 draws (index modulo 320) | resolution independence without extra RNG draws | spec 04 §6 |
+| Projection | `projection = centerxfrac` (half the window width) | `projection = vw0·H/400` in fixed point (`W43/2` of the window's 4:3 size), `centerx = W/2`: Hor+; identical at 320x200 | spec 04 §2, ADR-010 | `r_main.c:R_ExecuteSetViewSize` |
+| Light by scale | `scalelight` indexed by `scale >> 12` | scale multiplied by `200/H` before indexing (spec 04 §4); table built with the virtual window width | light falls off with distance exactly as in the original at any height | spec 04 §4 |
+| Scale limits | wall scale clamped to `[256, 64·FRACUNIT]` | upper clamp `64·FRACUNIT·H/200` outside vanilla (same value at H = 200) | scale grows with `H` | `r_main.c:R_ScaleFromGlobalAngle` |
+| `viewangletox` range | tangent clamp at ±2.0 | clamp grows with the aspect (`ceil(centerx/projection)+1`) outside vanilla | fields of view wider than 127 degrees | `r_main.c:R_InitTextureMapping` |
+| Span drawer | Chocolate's packed 6.10/6.10 position (carry of the v fraction into u) | reproduced in vanilla mode; plain 16.16 u/v outside it | exactness at 320x200, precision at high resolution | `r_draw.c:R_DrawSpan` |
+| Texture wrap | `dc_source[(frac>>16) & 127]` | reproduced in vanilla mode (single-patch columns read the lump bytes after the post, short composite columns read on into the next composite column); outside it walls wrap at the real height and posts clamp | "tutti-frutti" kept only in vanilla mode | spec 04 §4 |
+| Composite memory past the end | the last composite column reads heap garbage | reads zeros (128 bytes of padding) | undefined in the original; not seen in the oracle frames | `r_data.c:R_GenerateComposite` |
+| Masked multi-patch textures (Medusa) | masked mid textures made of several patches are read as posts from raw composite pixels (garbage) | posts are derived from the pixels the patches covered | spec 04 §4 (DIVERGE) | `r_segs.c:R_RenderMaskedSegRange` |
+| Column without a patch | `R_GenerateLookup` prints a message and stops filling the lookup | the column is composed as transparent/zero and the rest of the texture is processed | robustness | `r_data.c:R_GenerateLookup` |
+| Pool limits | 128 visplanes (error), 256 drawsegs (silently dropped), 128 vissprites (overflow sprite), `32` solid segs (Chocolate error), `64·320` openings | all pools grow on demand; nothing is dropped or fatal | spec 04 §4 (visplane overflow is not reproduced) | `r_plane.c`, `r_bsp.c`, `r_things.c` |
+| Visplane columns | `byte top[]/bottom[]` with 0xff as "unset" (limits height to 255) | `short[]` with `Short.MAX_VALUE` as unset | frames taller than 255 rows | `r_plane.c:visplane_t` |
+| Sprite range checks | `RANGECHECK` builds `I_Error` on invalid sprite/frame/column | invalid sprite or frame: the thing is not drawn; sprite column clamped | never fail on bad data | `r_things.c` |
+| Own sprite | the viewer's own mobj is skipped only because `tz < MINZ` | skipped explicitly (`Camera.viewActor`) | stays correct with an interpolated camera | `r_things.c:R_ProjectSprite` |
+| Sprite lumps | `R_InitSpriteLumps` reads all headers at start | pictures decoded on first use (`precache()` loads all) | start-up time | `r_things.c:R_InitSpriteLumps` |
+| Fuzz at high resolution | one row up/down per pixel | `FuzzStyle.SCALED` (default outside vanilla, only when `H >= 400`): offset and table position in blocks of `round(H/200)` rows and columns; `PIXEL` keeps the original | spec 04 §4 | `r_draw.c:R_DrawFuzzColumn` |
+| HUD message line in the golden frames | the oracle frame is the whole screen | `GoldenFrameIT` ignores differences in the first 10 rows of the view window (the HU message line, drawn by the 2D layer); everything else must be identical (91 of 167 frames contain a message) | the 3D renderer does not draw HUD | `hu_stuff.c` |
+| `precisionFixes` | n/a | accepted in `RenderOptions` and ignored for now | task brief ("off for now") | spec 04 §3 |
+| Texture composition threads | single thread | `precache()` composes textures on virtual threads | start-up time | spec 04 §4 |

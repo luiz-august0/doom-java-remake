@@ -1,0 +1,67 @@
+doom-java
+A remake of DOOM (1993) in Java 25.
+
+doom-java is free software, licensed under the GNU General Public License, version 2 (see LICENSE). It is a derivative
+work of the sources and behaviour listed below.
+
+------------------------------------------------------------------------------------------------------------------------
+id Software
+------------------------------------------------------------------------------------------------------------------------
+DOOM(R) is a registered trademark of id Software LLC, a ZeniMax Media company. This project is not affiliated with or
+endorsed by id Software, ZeniMax or Bethesda.
+
+The game rules reproduced by this project (simulation, data tables, level loading, rendering algorithms, user interface
+layout) were studied in the DOOM source code that id Software released under the GNU General Public License
+(linuxdoom-1.10, "DOOM source release", December 1997):
+
+    Copyright (C) 1993-1996 by id Software, Inc.
+
+The game data (the IWAD files DOOM.WAD, DOOM2.WAD, TNT.WAD, PLUTONIA.WAD and the shareware DOOM1.WAD) is the property of
+id Software and is NOT part of this repository or of its distributions. Players supply their own copy, use the shareware
+DOOM1.WAD, or use Freedoom.
+
+------------------------------------------------------------------------------------------------------------------------
+Chocolate Doom
+------------------------------------------------------------------------------------------------------------------------
+Chocolate Doom (https://www.chocolate-doom.org/), GNU General Public License v2 or later:
+
+    Copyright (C) 1993-1996 id Software, Inc.
+    Copyright (C) 2005-2014 Simon Howard
+    and the Chocolate Doom contributors.
+
+Chocolate Doom 3.1.1 is the reference for the exact behaviour of DOOM.EXE v1.9 where it differs from linuxdoom-1.10
+(overflow emulation, demo compatibility, DEHACKED, OPL music playback, MUS to MIDI conversion, sound mixing). It is also
+the test oracle: tools/oracle/chocolate-trace.patch is a patch against Chocolate Doom 3.1.1, and the reference traces in
+testdata/traces/ were produced by the patched program. The patch is distributed under the same license as the program it
+modifies.
+
+------------------------------------------------------------------------------------------------------------------------
+Nuked OPL3
+------------------------------------------------------------------------------------------------------------------------
+doom-sound/src/main/java/doom/sound/opl contains a Java port of the Nuked OPL3 emulator, version 1.8, as used by
+Chocolate Doom (opl/opl3.c). Nuked OPL3 is licensed under the GNU Lesser General Public License, version 2.1 or later:
+
+    Copyright (C) 2013-2020 Nuke.YKT (Alexey Khokholov)
+
+Nuked OPL3 is based on research by Nuke.YKT, Wohlstand and the other contributors credited at
+https://github.com/nukeykt/Nuked-OPL3, including the OPL3 die-shot analysis and the original DOSBox OPL emulation
+(Copyright (C) 2002-2011 The DOSBox Team).
+
+------------------------------------------------------------------------------------------------------------------------
+Third-party libraries used at run time
+------------------------------------------------------------------------------------------------------------------------
+LWJGL 3 (https://www.lwjgl.org/), BSD 3-Clause license, Copyright (c) 2012-present Lightweight Java Game Library
+Project. Used modules: lwjgl, lwjgl-glfw, lwjgl-opengl and their native libraries. The native libraries bundle GLFW
+(zlib/libpng license, Copyright (c) 2002-2006 Marcus Geelnard, 2006-2019 Camilla Loewy).
+
+No other library is used at run time: everything else (WAD reading, rendering, OPL3 music, mixing, PNG encoding,
+configuration, logging) is written in Java on top of the JDK.
+
+------------------------------------------------------------------------------------------------------------------------
+Test and development dependencies (not distributed)
+------------------------------------------------------------------------------------------------------------------------
+JUnit 5 (Eclipse Public License 2.0), AssertJ (Apache License 2.0), JMH (GPL v2 with Classpath Exception).
+
+Freedoom (https://freedoom.github.io/), BSD 3-Clause license, Copyright (c) 2001-present Contributors to the Freedoom
+project. The Freedoom IWADs are downloaded by the CI workflow and by users; they are not committed to this repository.
+Freedoom is a free replacement for the DOOM game data and is not affiliated with id Software.

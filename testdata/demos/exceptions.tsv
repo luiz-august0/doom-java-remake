@@ -1,0 +1,4 @@
+# Demos excluded from the sync gate, with justification (spec 09 §2.4). Columns: name, first allowed divergence tic, key, reason.
+# The demo still runs and is reported; a divergence is accepted only at/after the listed tic and on the listed key.
+F2M29A	1036	a	Arch-vile tracer points to its freed fire; the oracle's zone allocator reuses that block for a puff spawned the same tic, so the oracle prints the puff's thinker index where we print -2. Not reproducible without emulating Z_Malloc block reuse; the pointer is never dereferenced afterwards.
+F2M29B	1201	a	Same case as F2M29A.

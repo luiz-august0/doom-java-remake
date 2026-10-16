@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Starts the game: bin/doom-java [options]   (bin/doom-java -help lists the options)
+# Environment: DOOM_NO_BUILD=1 skips the Maven step (uses the classpath cached by the last run);
+#              DOOM_JVM_OPTS adds JVM options; DOOM_NO_FIRST_THREAD=1 omits -XstartOnFirstThread on macOS.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CP_FILE="$ROOT/doom-app/target/game-classpath.txt"
+
+if [[ "${DOOM_NO_BUILD:-}" != "1" || ! -f "$CP_FILE" ]]; then
+  mkdir -p "$ROOT/doom-app/target"
+  (cd "$ROOT" && ./mvnw -o -q -pl doom-app -am compile dependency:build-classpath \
+      -Dmdep.outputFile="$CP_FILE" -Dmdep.includeScope=runtime)
+fi
+
+# Module path: reactor output directories + runtime dependencies (LWJGL, backends), without test-only libraries.
+MODULE_PATH="$ROOT/doom-app/target/classes"
+IFS=':' read -r -a ENTRIES < "$CP_FILE" || true  # the file has no trailing newline
+for e in "${ENTRIES[@]}"; do
+  case "$e" in
+    *junit*|*assertj*|*opentest4j*|*apiguardian*|*byte-buddy*) ;;
+    *) MODULE_PATH="$MODULE_PATH:$e" ;;
+  esac
+done
+
+# Lets the game find the IWADs committed in .iwads/ (IwadLocator searches $DOOM_APP_DIR/.iwads last).
+export DOOM_APP_DIR="${DOOM_APP_DIR:-$ROOT}"
+
+# Flags verified on JDK 25 (docs/notes/platform.md).
+JVM_FLAGS=(--enable-native-access=org.lwjgl,org.lwjgl.glfw,org.lwjgl.opengl)
+if [[ "$(uname -s)" == "Darwin" && "${DOOM_NO_FIRST_THREAD:-}" != "1" ]]; then
+  JVM_FLAGS+=(-XstartOnFirstThread)
+fi
+
+# shellcheck disable=SC2086
+exec java "${JVM_FLAGS[@]}" ${DOOM_JVM_OPTS:-} --module-path "$MODULE_PATH" -m doom.app/doom.app.Main "$@"

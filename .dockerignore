@@ -1,0 +1,6 @@
+**/target/
+tools/oracle/work/
+.claude/
+.idea/
+*.log
+bench-results/

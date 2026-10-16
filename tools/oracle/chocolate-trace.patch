@@ -1,0 +1,1560 @@
+diff --git a/src/deh_str.c b/src/deh_str.c
+index 76af188..7b5f418 100644
+--- a/src/deh_str.c
++++ b/src/deh_str.c
+@@ -19,6 +19,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
+ 
+ #include "doomtype.h"
+ #include "deh_str.h"
+@@ -431,3 +433,59 @@ void DEH_snprintf(char *buffer, size_t len, const char *fmt, ...)
+     va_end(args);
+ }
+ 
++
++// Oracle: dumps every replaced string, sorted by the original text.
++static int CompareSubstitutions(const void *a, const void *b)
++{
++    const deh_substitution_t *x = *(const deh_substitution_t *const *) a;
++    const deh_substitution_t *y = *(const deh_substitution_t *const *) b;
++
++    return strcmp(x->from_text, y->from_text);
++}
++
++static void DumpQuoted(FILE *f, const char *s)
++{
++    const unsigned char *p = (const unsigned char *) s;
++
++    fputc('"', f);
++    for (; *p != '\0'; ++p)
++    {
++        if (*p == '\\') fputs("\\\\", f);
++        else if (*p == '"') fputs("\\\"", f);
++        else if (*p == '\n') fputs("\\n", f);
++        else if (*p < 0x20 || *p >= 0x7f) fprintf(f, "\\x%02x", *p);
++        else fputc(*p, f);
++    }
++    fputc('"', f);
++}
++
++void DEH_DumpStrings(FILE *f)
++{
++    deh_substitution_t **list;
++    int i, n = 0;
++
++    if (hash_table_length < 0)
++    {
++        fprintf(f, "strings 0\n");
++        return;
++    }
++    list = malloc(sizeof(*list) * (hash_table_entries + 1));
++    for (i = 0; i < hash_table_length; ++i)
++    {
++        if (hash_table[i] != NULL)
++        {
++            list[n++] = hash_table[i];
++        }
++    }
++    qsort(list, n, sizeof(*list), CompareSubstitutions);
++    fprintf(f, "strings %d\n", n);
++    for (i = 0; i < n; ++i)
++    {
++        fputs("string ", f);
++        DumpQuoted(f, list[i]->from_text);
++        fputs(" -> ", f);
++        DumpQuoted(f, list[i]->to_text);
++        fputc('\n', f);
++    }
++    free(list);
++}
+diff --git a/src/doom/CMakeLists.txt b/src/doom/CMakeLists.txt
+index 6e878a0..215aca5 100644
+--- a/src/doom/CMakeLists.txt
++++ b/src/doom/CMakeLists.txt
+@@ -27,6 +27,9 @@ add_library(doom STATIC
+             hu_lib.c        hu_lib.h
+             hu_stuff.c      hu_stuff.h
+             info.c          info.h
++            oracle.c        oracle.h
++            oracle_defs.c
++            oracle_frame.c
+             m_menu.c        m_menu.h
+             m_random.c      m_random.h
+             p_ceilng.c
+diff --git a/src/doom/d_main.c b/src/doom/d_main.c
+index 014e487..f6d20e6 100644
+--- a/src/doom/d_main.c
++++ b/src/doom/d_main.c
+@@ -27,6 +27,7 @@
+ 
+ #include "config.h"
+ #include "deh_main.h"
++#include "oracle.h"
+ #include "doomdef.h"
+ #include "doomstat.h"
+ 
+@@ -437,7 +438,10 @@ void D_RunFrame()
+     // Update display, next frame, with current state if no profiling is on
+     if (screenvisible && !nodrawers)
+     {
+-        if ((wipe = D_Display ()))
++        Oracle_BeforeDisplay();
++        wipe = D_Display ();
++        Oracle_AfterDisplay();
++        if (wipe)
+         {
+             // start wipe on this frame
+             wipe_EndScreen(0, 0, SCREENWIDTH, SCREENHEIGHT);
+@@ -1725,6 +1729,13 @@ void D_DoomMain (void)
+     // we've finished loading Dehacked patches.
+     D_SetGameDescription();
+ 
++    {
++        int oracle_p = M_CheckParmWithArgs("-playdemo", 1);
++        if (!oracle_p)
++            oracle_p = M_CheckParmWithArgs("-timedemo", 1);
++        Oracle_Init(iwadfile, oracle_p ? myargv[oracle_p + 1] : NULL);
++    }
++
+     savegamedir = M_GetSaveGameDir(D_SaveGameIWADName(gamemission, gamevariant));
+ 
+     // Check for -file in shareware
+diff --git a/src/doom/d_net.c b/src/doom/d_net.c
+index f8969fe..c6c9fcf 100644
+--- a/src/doom/d_net.c
++++ b/src/doom/d_net.c
+@@ -35,6 +35,7 @@
+ #include "deh_main.h"
+ 
+ #include "d_loop.h"
++#include "oracle.h"
+ 
+ ticcmd_t *netcmds;
+ 
+@@ -89,6 +90,7 @@ static void RunTic(ticcmd_t *cmds, boolean *ingame)
+         D_DoAdvanceDemo ();
+ 
+     G_Ticker ();
++    Oracle_AfterTic();
+ }
+ 
+ static loop_interface_t doom_loop_interface = {
+diff --git a/src/doom/oracle.c b/src/doom/oracle.c
+new file mode 100644
+index 0000000..7b5104f
+--- /dev/null
++++ b/src/doom/oracle.c
+@@ -0,0 +1,741 @@
++//
++// Test-oracle extensions for the doom-java project: per-tic trace (trace format v1).
++// See tools/oracle/FORMAT.md and docs/contracts.md section 6.
++//
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdint.h>
++
++#include "doomtype.h"
++#include "doomstat.h"
++#include "doomdef.h"
++#include "d_items.h"
++#include "d_player.h"
++#include "i_system.h"
++#include "info.h"
++#include "m_argv.h"
++#include "m_misc.h"
++#include "m_random.h"
++#include "p_local.h"
++#include "p_mobj.h"
++#include "p_spec.h"
++#include "r_defs.h"
++#include "r_state.h"
++
++#include "oracle.h"
++
++extern thinker_t thinkercap;
++extern void T_FireFlicker(fireflicker_t *flick);
++extern int prndindex;
++
++// ---------------------------------------------------------------------------
++// Output streams and shared state
++// ---------------------------------------------------------------------------
++
++const char *oracle_iwad = "unknown";
++char oracle_demo[64] = "none";
++const char *oracle_version = "1.9";
++int oracle_last_tic = -1; // index of the last completed G_Ticker call
++
++static FILE *trace_file = NULL;
++static boolean trace_pipe = false;
++static FILE *verbose_file = NULL;
++static boolean verbose_pipe = false;
++static int verbose_from = 0;
++static int verbose_to = 0x7fffffff;
++
++static int trace_tic = 0; // number of G_Ticker calls so far
++
++static const char *BaseName(const char *path)
++{
++    const char *p = strrchr(path, '/');
++    const char *q = strrchr(path, '\\');
++
++    if (q != NULL && (p == NULL || q > p))
++    {
++        p = q;
++    }
++    return p != NULL ? p + 1 : path;
++}
++
++static boolean EndsWith(const char *s, const char *suffix)
++{
++    size_t a = strlen(s);
++    size_t b = strlen(suffix);
++
++    return a >= b && strcmp(s + a - b, suffix) == 0;
++}
++
++// Opens a text output file; a name ending in .gz is compressed through gzip(1).
++static FILE *OpenOutput(const char *name, boolean *is_pipe)
++{
++    FILE *f;
++
++    *is_pipe = false;
++    if (EndsWith(name, ".gz"))
++    {
++        char cmd[2048];
++
++        if (strchr(name, '\'') != NULL)
++        {
++            I_Error("oracle: unsupported character in file name %s", name);
++        }
++        snprintf(cmd, sizeof(cmd), "gzip -n -c > '%s'", name);
++        f = popen(cmd, "w");
++        *is_pipe = true;
++    }
++    else
++    {
++        f = fopen(name, "w");
++    }
++    if (f == NULL)
++    {
++        I_Error("oracle: cannot open %s for writing", name);
++    }
++    return f;
++}
++
++static void CloseOutput(FILE *f, boolean is_pipe)
++{
++    if (f == NULL)
++    {
++        return;
++    }
++    if (is_pipe)
++    {
++        pclose(f);
++    }
++    else
++    {
++        fclose(f);
++    }
++}
++
++static void Oracle_Close(void)
++{
++    CloseOutput(trace_file, trace_pipe);
++    trace_file = NULL;
++    CloseOutput(verbose_file, verbose_pipe);
++    verbose_file = NULL;
++}
++
++void Oracle_WriteHeader(FILE *f, const char *magic)
++{
++    fprintf(f, "#%s iwad=%s demo=%s version=%s\n", magic, oracle_iwad, oracle_demo,
++            oracle_version);
++}
++
++void Oracle_Init(const char *iwadpath, const char *demoarg)
++{
++    int p;
++    const char *name;
++    size_t len, i;
++
++    oracle_iwad = iwadpath != NULL ? BaseName(iwadpath) : "unknown";
++    switch (gameversion)
++    {
++        case exe_ultimate: oracle_version = "ultimate"; break;
++        case exe_final:    oracle_version = "final"; break;
++        case exe_final2:   oracle_version = "final2"; break;
++        default:           oracle_version = "1.9"; break;
++    }
++    if (demoarg != NULL)
++    {
++        name = BaseName(demoarg);
++        M_StringCopy(oracle_demo, name, sizeof(oracle_demo));
++        len = strlen(oracle_demo);
++        if (len > 4 && strcasecmp(oracle_demo + len - 4, ".lmp") == 0)
++        {
++            oracle_demo[len - 4] = '\0';
++        }
++        for (i = 0; oracle_demo[i] != '\0'; ++i)
++        {
++            if (oracle_demo[i] >= 'a' && oracle_demo[i] <= 'z')
++            {
++                oracle_demo[i] -= 'a' - 'A';
++            }
++        }
++    }
++
++    p = M_CheckParmWithArgs("-tracefrom", 1);
++    if (p)
++    {
++        verbose_from = atoi(myargv[p + 1]);
++    }
++    p = M_CheckParmWithArgs("-traceto", 1);
++    if (p)
++    {
++        verbose_to = atoi(myargv[p + 1]);
++    }
++    p = M_CheckParmWithArgs("-trace", 1);
++    if (p)
++    {
++        trace_file = OpenOutput(myargv[p + 1], &trace_pipe);
++        Oracle_WriteHeader(trace_file, "doom-trace v1");
++    }
++    p = M_CheckParmWithArgs("-traceverbose", 1);
++    if (p)
++    {
++        verbose_file = OpenOutput(myargv[p + 1], &verbose_pipe);
++        Oracle_WriteHeader(verbose_file, "doom-trace v1");
++    }
++    if (trace_file != NULL || verbose_file != NULL)
++    {
++        I_AtExit(Oracle_Close, true);
++    }
++
++    p = M_CheckParmWithArgs("-dumpframe", 2);
++    if (p)
++    {
++        Oracle_DumpFrameInit(myargv[p + 1], myargv[p + 2]);
++    }
++    p = M_CheckParmWithArgs("-dumpdefs", 1);
++    if (p)
++    {
++        Oracle_DumpDefs(myargv[p + 1]);
++    }
++}
++
++// ---------------------------------------------------------------------------
++// Thinker index (pointer -> position among the live thinkers)
++// ---------------------------------------------------------------------------
++
++static void **map_keys = NULL;
++static int *map_values = NULL;
++static unsigned int map_size = 0; // power of two
++
++static thinker_t **thinker_list = NULL; // index -> thinker
++static int thinker_list_size = 0;
++static int thinker_count = 0;
++
++static unsigned int PtrHash(const void *p)
++{
++    uint64_t v = (uint64_t) (uintptr_t) p;
++
++    v ^= v >> 33;
++    v *= 0xff51afd7ed558ccdULL;
++    v ^= v >> 33;
++    return (unsigned int) v;
++}
++
++// A thinker marked for removal (function == -1) is no longer live.
++static boolean IsLive(const thinker_t *th)
++{
++    return th->function.acv != (actionf_v) (intptr_t) -1;
++}
++
++static void MapClear(unsigned int wanted)
++{
++    unsigned int size = 1024;
++
++    while (size < wanted * 2)
++    {
++        size <<= 1;
++    }
++    if (size != map_size)
++    {
++        free(map_keys);
++        free(map_values);
++        map_keys = calloc(size, sizeof(void *));
++        map_values = calloc(size, sizeof(int));
++        map_size = size;
++    }
++    else
++    {
++        memset(map_keys, 0, size * sizeof(void *));
++    }
++}
++
++static void MapPut(void *key, int value)
++{
++    unsigned int i = PtrHash(key) & (map_size - 1);
++
++    while (map_keys[i] != NULL)
++    {
++        i = (i + 1) & (map_size - 1);
++    }
++    map_keys[i] = key;
++    map_values[i] = value;
++}
++
++// -1 for NULL, -2 for a pointer that is not a live thinker (never dereferenced).
++static int ThinkerIndex(const void *p)
++{
++    unsigned int i;
++
++    if (p == NULL)
++    {
++        return -1;
++    }
++    i = PtrHash(p) & (map_size - 1);
++    while (map_keys[i] != NULL)
++    {
++        if (map_keys[i] == p)
++        {
++            return map_values[i];
++        }
++        i = (i + 1) & (map_size - 1);
++    }
++    return -2;
++}
++
++static void BuildThinkerIndex(void)
++{
++    thinker_t *th;
++    int n = 0;
++
++    for (th = thinkercap.next; th && th != &thinkercap; th = th->next)
++    {
++        if (IsLive(th))
++        {
++            ++n;
++        }
++    }
++    MapClear((unsigned int) n);
++    if (n > thinker_list_size)
++    {
++        thinker_list_size = n + n / 2 + 64;
++        thinker_list = realloc(thinker_list, thinker_list_size * sizeof(*thinker_list));
++    }
++    thinker_count = 0;
++    for (th = thinkercap.next; th && th != &thinkercap; th = th->next)
++    {
++        if (IsLive(th))
++        {
++            MapPut(th, thinker_count);
++            thinker_list[thinker_count++] = th;
++        }
++    }
++}
++
++// ---------------------------------------------------------------------------
++// FNV-1a 64 over little-endian int32 values
++// ---------------------------------------------------------------------------
++
++#define FNV_BASIS 0xcbf29ce484222325ULL
++#define FNV_PRIME 0x100000001b3ULL
++
++static void Fnv(uint64_t *h, int32_t value)
++{
++    uint32_t v = (uint32_t) value;
++    int i;
++
++    for (i = 0; i < 4; ++i)
++    {
++        *h ^= (uint64_t) (v & 0xff);
++        *h *= FNV_PRIME;
++        v >>= 8;
++    }
++}
++
++static int SectorIndex(const sector_t *s)
++{
++    return s == NULL ? -1 : (int) (s - sectors);
++}
++
++static int StateIndex(const state_t *s)
++{
++    return s == NULL ? -1 : (int) (s - states);
++}
++
++// ---------------------------------------------------------------------------
++// Object field extraction (shared by hashing and the verbose trace)
++// ---------------------------------------------------------------------------
++
++#define MOBJ_FIELDS 26
++#define SPECIAL_MAX 16
++
++static void MobjFields(const mobj_t *mo, int32_t *f)
++{
++    int n = 0;
++
++    f[n++] = mo->type;
++    f[n++] = mo->x;
++    f[n++] = mo->y;
++    f[n++] = mo->z;
++    f[n++] = (int32_t) mo->angle;
++    f[n++] = mo->momx;
++    f[n++] = mo->momy;
++    f[n++] = mo->momz;
++    f[n++] = mo->floorz;
++    f[n++] = mo->ceilingz;
++    f[n++] = mo->radius;
++    f[n++] = mo->height;
++    f[n++] = StateIndex(mo->state);
++    f[n++] = mo->tics;
++    f[n++] = mo->sprite;
++    f[n++] = mo->frame;
++    f[n++] = mo->flags;
++    f[n++] = mo->health;
++    f[n++] = mo->movedir;
++    f[n++] = mo->movecount;
++    f[n++] = mo->reactiontime;
++    f[n++] = mo->threshold;
++    f[n++] = mo->lastlook;
++    f[n++] = ThinkerIndex(mo->target);
++    f[n++] = ThinkerIndex(mo->tracer);
++    f[n++] = mo->player == NULL ? -1 : (int) (mo->player - players);
++}
++
++// Fills f with the kind code followed by the fields; returns the number of values.
++static int SpecialFields(thinker_t *th, int32_t *f)
++{
++    int n = 0;
++    actionf_p1 fn = th->function.acp1;
++    int code = 0;
++    int i;
++
++    if (th->function.acv == NULL)
++    {
++        for (i = 0; i < MAXCEILINGS; ++i)
++        {
++            if (activeceilings[i] == (ceiling_t *) th)
++            {
++                code = 102;
++                break;
++            }
++        }
++        if (code == 0)
++        {
++            for (i = 0; i < MAXPLATS; ++i)
++            {
++                if (activeplats[i] == (plat_t *) th)
++                {
++                    code = 104;
++                    break;
++                }
++            }
++        }
++    }
++    else if (fn == (actionf_p1) T_VerticalDoor) code = 1;
++    else if (fn == (actionf_p1) T_MoveCeiling) code = 2;
++    else if (fn == (actionf_p1) T_MoveFloor) code = 3;
++    else if (fn == (actionf_p1) T_PlatRaise) code = 4;
++    else if (fn == (actionf_p1) T_LightFlash) code = 5;
++    else if (fn == (actionf_p1) T_StrobeFlash) code = 6;
++    else if (fn == (actionf_p1) T_Glow) code = 7;
++    else if (fn == (actionf_p1) T_FireFlicker) code = 8;
++
++    f[n++] = code;
++    switch (code)
++    {
++        case 1:
++        {
++            vldoor_t *d = (vldoor_t *) th;
++            f[n++] = d->type;
++            f[n++] = SectorIndex(d->sector);
++            f[n++] = d->topheight;
++            f[n++] = d->speed;
++            f[n++] = d->direction;
++            f[n++] = d->topwait;
++            f[n++] = d->topcountdown;
++            break;
++        }
++        case 2:
++        case 102:
++        {
++            ceiling_t *c = (ceiling_t *) th;
++            f[n++] = c->type;
++            f[n++] = SectorIndex(c->sector);
++            f[n++] = c->bottomheight;
++            f[n++] = c->topheight;
++            f[n++] = c->speed;
++            f[n++] = c->crush ? 1 : 0;
++            f[n++] = c->direction;
++            f[n++] = c->tag;
++            f[n++] = c->olddirection;
++            break;
++        }
++        case 3:
++        {
++            floormove_t *m = (floormove_t *) th;
++            f[n++] = m->type;
++            f[n++] = m->crush ? 1 : 0;
++            f[n++] = SectorIndex(m->sector);
++            f[n++] = m->direction;
++            f[n++] = m->newspecial;
++            f[n++] = m->texture;
++            f[n++] = m->floordestheight;
++            f[n++] = m->speed;
++            break;
++        }
++        case 4:
++        case 104:
++        {
++            plat_t *p = (plat_t *) th;
++            f[n++] = p->type;
++            f[n++] = SectorIndex(p->sector);
++            f[n++] = p->speed;
++            f[n++] = p->low;
++            f[n++] = p->high;
++            f[n++] = p->wait;
++            f[n++] = p->count;
++            f[n++] = p->status;
++            f[n++] = p->oldstatus;
++            f[n++] = p->crush ? 1 : 0;
++            f[n++] = p->tag;
++            break;
++        }
++        case 5:
++        {
++            lightflash_t *l = (lightflash_t *) th;
++            f[n++] = SectorIndex(l->sector);
++            f[n++] = l->count;
++            f[n++] = l->maxlight;
++            f[n++] = l->minlight;
++            f[n++] = l->maxtime;
++            f[n++] = l->mintime;
++            break;
++        }
++        case 6:
++        {
++            strobe_t *s = (strobe_t *) th;
++            f[n++] = SectorIndex(s->sector);
++            f[n++] = s->count;
++            f[n++] = s->minlight;
++            f[n++] = s->maxlight;
++            f[n++] = s->darktime;
++            f[n++] = s->brighttime;
++            break;
++        }
++        case 7:
++        {
++            glow_t *g = (glow_t *) th;
++            f[n++] = SectorIndex(g->sector);
++            f[n++] = g->minlight;
++            f[n++] = g->maxlight;
++            f[n++] = g->direction;
++            break;
++        }
++        case 8:
++        {
++            fireflicker_t *x = (fireflicker_t *) th;
++            f[n++] = SectorIndex(x->sector);
++            f[n++] = x->count;
++            f[n++] = x->maxlight;
++            f[n++] = x->minlight;
++            break;
++        }
++        default:
++            break;
++    }
++    return n;
++}
++
++// ---------------------------------------------------------------------------
++// Trace line
++// ---------------------------------------------------------------------------
++
++#define PLAYER_FIELDS 61
++
++static void PrintPlayer(FILE *out, int pn)
++{
++    player_t *p = &players[pn];
++    mobj_t *mo = p->mo;
++    int32_t v[PLAYER_FIELDS];
++    int n = 0;
++    int i, mask;
++
++    memset(v, 0, sizeof(v));
++    if (mo != NULL)
++    {
++        v[0] = mo->x;
++        v[1] = mo->y;
++        v[2] = mo->z;
++        v[3] = (int32_t) mo->angle;
++        v[4] = mo->momx;
++        v[5] = mo->momy;
++        v[6] = mo->momz;
++        v[7] = mo->health;
++    }
++    n = 8;
++    v[n++] = p->viewz;
++    v[n++] = p->viewheight;
++    v[n++] = p->deltaviewheight;
++    v[n++] = p->bob;
++    v[n++] = p->playerstate;
++    v[n++] = p->health;
++    v[n++] = p->armorpoints;
++    v[n++] = p->armortype;
++    v[n++] = p->readyweapon;
++    v[n++] = p->pendingweapon;
++    mask = 0;
++    for (i = 0; i < NUMWEAPONS; ++i)
++    {
++        if (p->weaponowned[i])
++        {
++            mask |= 1 << i;
++        }
++    }
++    v[n++] = mask;
++    for (i = 0; i < NUMAMMO; ++i) v[n++] = p->ammo[i];
++    for (i = 0; i < NUMAMMO; ++i) v[n++] = p->maxammo[i];
++    mask = 0;
++    for (i = 0; i < NUMCARDS; ++i)
++    {
++        if (p->cards[i])
++        {
++            mask |= 1 << i;
++        }
++    }
++    v[n++] = mask;
++    v[n++] = p->backpack ? 1 : 0;
++    for (i = 0; i < NUMPOWERS; ++i) v[n++] = p->powers[i];
++    v[n++] = p->cheats;
++    v[n++] = p->refire;
++    v[n++] = p->killcount;
++    v[n++] = p->itemcount;
++    v[n++] = p->secretcount;
++    v[n++] = p->damagecount;
++    v[n++] = p->bonuscount;
++    v[n++] = p->extralight;
++    v[n++] = p->fixedcolormap;
++    v[n++] = p->colormap;
++    v[n++] = ThinkerIndex(p->attacker);
++    for (i = 0; i < 2; ++i)
++    {
++        pspdef_t *ps = &p->psprites[i];
++        v[n++] = StateIndex(ps->state);
++        v[n++] = ps->tics;
++        v[n++] = ps->sx;
++        v[n++] = ps->sy;
++    }
++    v[n++] = p->attackdown;
++    v[n++] = p->usedown;
++    for (i = 0; i < MAXPLAYERS; ++i) v[n++] = p->frags[i];
++    v[n++] = p->didsecret ? 1 : 0;
++
++    if (n != PLAYER_FIELDS)
++    {
++        I_Error("oracle: player field count %d", n);
++    }
++    fprintf(out, ";p%d=", pn);
++    for (i = 0; i < n; ++i)
++    {
++        fprintf(out, i == 0 ? "%d" : ",%d", v[i]);
++    }
++}
++
++static void WriteTraceLine(int tic)
++{
++    FILE *out[2];
++    int nout = 0;
++    boolean verbose;
++    uint64_t ha = FNV_BASIS, hs = FNV_BASIS, hl = FNV_BASIS, hd = FNV_BASIS, hx = FNV_BASIS;
++    int acount = 0, xcount = 0;
++    int i, k;
++    int32_t f[MOBJ_FIELDS > SPECIAL_MAX ? MOBJ_FIELDS : SPECIAL_MAX];
++
++    if (trace_file != NULL) out[nout++] = trace_file;
++    if (verbose_file != NULL) out[nout++] = verbose_file;
++    verbose = verbose_file != NULL && tic >= verbose_from && tic <= verbose_to;
++
++    BuildThinkerIndex();
++
++    for (i = 0; i < thinker_count; ++i)
++    {
++        thinker_t *th = thinker_list[i];
++
++        if (th->function.acp1 == (actionf_p1) P_MobjThinker)
++        {
++            MobjFields((mobj_t *) th, f);
++            for (k = 0; k < MOBJ_FIELDS; ++k) Fnv(&ha, f[k]);
++            ++acount;
++        }
++        else
++        {
++            int n = SpecialFields(th, f);
++            for (k = 0; k < n; ++k) Fnv(&hx, f[k]);
++            ++xcount;
++        }
++    }
++    for (i = 0; i < numsectors; ++i)
++    {
++        sector_t *s = &sectors[i];
++        Fnv(&hs, s->floorheight);
++        Fnv(&hs, s->ceilingheight);
++        Fnv(&hs, s->floorpic);
++        Fnv(&hs, s->ceilingpic);
++        Fnv(&hs, s->lightlevel);
++        Fnv(&hs, s->special);
++        Fnv(&hs, s->tag);
++        Fnv(&hs, s->soundtraversed);
++        Fnv(&hs, ThinkerIndex(s->soundtarget));
++        Fnv(&hs, ThinkerIndex(s->specialdata));
++    }
++    for (i = 0; i < numlines; ++i)
++    {
++        line_t *l = &lines[i];
++        Fnv(&hl, l->flags & ~0x100);
++        Fnv(&hl, l->special);
++        Fnv(&hl, l->tag);
++    }
++    for (i = 0; i < numsides; ++i)
++    {
++        side_t *sd = &sides[i];
++        Fnv(&hd, sd->textureoffset);
++        Fnv(&hd, sd->rowoffset);
++        Fnv(&hd, sd->toptexture);
++        Fnv(&hd, sd->bottomtexture);
++        Fnv(&hd, sd->midtexture);
++    }
++
++    for (k = 0; k < nout; ++k)
++    {
++        FILE *o = out[k];
++
++        fprintf(o, "t=%d;gs=%d;r=%d;lt=%d;map=%d,%d,%d;tot=%d,%d,%d", tic, (int) gamestate,
++                prndindex, leveltime, gameepisode, gamemap, (int) gameskill, totalkills,
++                totalitems, totalsecret);
++        for (i = 0; i < MAXPLAYERS; ++i)
++        {
++            if (playeringame[i])
++            {
++                PrintPlayer(o, i);
++            }
++        }
++        fprintf(o, ";a=%d,%016llx;s=%016llx;l=%016llx;d=%016llx;x=%d,%016llx;m=%d\n", acount,
++                (unsigned long long) ha, (unsigned long long) hs, (unsigned long long) hl,
++                (unsigned long long) hd, xcount, (unsigned long long) hx, rndindex);
++    }
++
++    if (verbose)
++    {
++        for (i = 0; i < thinker_count; ++i)
++        {
++            thinker_t *th = thinker_list[i];
++
++            if (th->function.acp1 == (actionf_p1) P_MobjThinker)
++            {
++                MobjFields((mobj_t *) th, f);
++                fprintf(verbose_file, "  a%d=", i);
++                for (k = 0; k < MOBJ_FIELDS; ++k)
++                {
++                    fprintf(verbose_file, k == 0 ? "%d" : ",%d", f[k]);
++                }
++            }
++            else
++            {
++                int n = SpecialFields(th, f);
++                fprintf(verbose_file, "  x%d=", i);
++                for (k = 0; k < n; ++k)
++                {
++                    fprintf(verbose_file, k == 0 ? "%d" : ",%d", f[k]);
++                }
++            }
++            fputc('\n', verbose_file);
++        }
++    }
++}
++
++void Oracle_AfterTic(void)
++{
++    if (trace_file != NULL || verbose_file != NULL)
++    {
++        WriteTraceLine(trace_tic);
++    }
++    oracle_last_tic = trace_tic;
++    ++trace_tic;
++}
+diff --git a/src/doom/oracle.h b/src/doom/oracle.h
+new file mode 100644
+index 0000000..1d00d6f
+--- /dev/null
++++ b/src/doom/oracle.h
+@@ -0,0 +1,42 @@
++//
++// Test-oracle extensions for the doom-java project (see tools/oracle/FORMAT.md).
++//
++// Every feature is opt-in through a command-line flag:
++//   -trace <file>                   per-tic trace v1 (docs/contracts.md section 6)
++//   -traceverbose <file>            verbose trace; -tracefrom/-traceto <tic> restrict the detail
++//   -dumpframe <tic,tic,...> <dir>  raw 320x200 frame + scene sidecar after the display of tic N
++//   -dumpdefs <file>                definition tables after DEHACKED
++//
++
++#ifndef ORACLE_H
++#define ORACLE_H
++
++#include <stdio.h>
++
++// Called once after all DEHACKED patches are loaded and the demo is known.
++void Oracle_Init(const char *iwadpath, const char *demoarg);
++
++// Called right after every G_Ticker() call (d_net.c RunTic).
++void Oracle_AfterTic(void);
++
++// D_RunFrame hooks: before D_Display() and right after it (before the wipe/blit).
++void Oracle_BeforeDisplay(void);
++void Oracle_AfterDisplay(void);
++
++// Shared state, for the other oracle source files.
++extern const char *oracle_iwad;
++extern char oracle_demo[64];
++extern const char *oracle_version;
++extern int oracle_last_tic;
++
++void Oracle_WriteHeader(FILE *f, const char *magic);
++void Oracle_DumpDefs(const char *filename);
++void Oracle_DumpFrameInit(const char *list, const char *dir);
++
++// Palette index currently loaded by the status bar code.
++int ST_GetPaletteIndex(void);
++
++// All strings replaced through DEHACKED, sorted by original text.
++void DEH_DumpStrings(FILE *f);
++
++#endif
+diff --git a/src/doom/oracle_defs.c b/src/doom/oracle_defs.c
+new file mode 100644
+index 0000000..0b12687
+--- /dev/null
++++ b/src/doom/oracle_defs.c
+@@ -0,0 +1,368 @@
++//
++// Test-oracle extensions for the doom-java project: definition tables after DEHACKED (-dumpdefs).
++// See tools/oracle/FORMAT.md.
++//
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "doomtype.h"
++#include "doomstat.h"
++#include "doomdef.h"
++#include "d_items.h"
++#include "deh_main.h"
++#include "deh_misc.h"
++#include "deh_str.h"
++#include "i_system.h"
++#include "info.h"
++#include "m_argv.h"
++#include "m_cheat.h"
++#include "sounds.h"
++#include "st_stuff.h"
++#include "am_map.h"
++
++#include "oracle.h"
++
++extern int maxammo[NUMAMMO];
++extern int clipammo[NUMAMMO];
++
++/* Generated: every action function referenced by states[] in info.c. */
++void A_BFGSpray();
++void A_BFGsound();
++void A_BabyMetal();
++void A_BossDeath();
++void A_BrainAwake();
++void A_BrainDie();
++void A_BrainExplode();
++void A_BrainPain();
++void A_BrainScream();
++void A_BrainSpit();
++void A_BruisAttack();
++void A_BspiAttack();
++void A_CPosAttack();
++void A_CPosRefire();
++void A_Chase();
++void A_CheckReload();
++void A_CloseShotgun2();
++void A_CyberAttack();
++void A_Explode();
++void A_FaceTarget();
++void A_Fall();
++void A_FatAttack1();
++void A_FatAttack2();
++void A_FatAttack3();
++void A_FatRaise();
++void A_Fire();
++void A_FireBFG();
++void A_FireCGun();
++void A_FireCrackle();
++void A_FireMissile();
++void A_FirePistol();
++void A_FirePlasma();
++void A_FireShotgun();
++void A_FireShotgun2();
++void A_GunFlash();
++void A_HeadAttack();
++void A_Hoof();
++void A_KeenDie();
++void A_Light0();
++void A_Light1();
++void A_Light2();
++void A_LoadShotgun2();
++void A_Look();
++void A_Lower();
++void A_Metal();
++void A_OpenShotgun2();
++void A_Pain();
++void A_PainAttack();
++void A_PainDie();
++void A_PlayerScream();
++void A_PosAttack();
++void A_Punch();
++void A_Raise();
++void A_ReFire();
++void A_SPosAttack();
++void A_SargAttack();
++void A_Saw();
++void A_Scream();
++void A_SkelFist();
++void A_SkelMissile();
++void A_SkelWhoosh();
++void A_SkullAttack();
++void A_SpawnFly();
++void A_SpawnSound();
++void A_SpidRefire();
++void A_StartFire();
++void A_Tracer();
++void A_TroopAttack();
++void A_VileAttack();
++void A_VileChase();
++void A_VileStart();
++void A_VileTarget();
++void A_WeaponReady();
++void A_XScream();
++static const struct { const char *name; void *fn; } oracle_actions[] = {
++    { "A_BFGSpray", (void *) A_BFGSpray },
++    { "A_BFGsound", (void *) A_BFGsound },
++    { "A_BabyMetal", (void *) A_BabyMetal },
++    { "A_BossDeath", (void *) A_BossDeath },
++    { "A_BrainAwake", (void *) A_BrainAwake },
++    { "A_BrainDie", (void *) A_BrainDie },
++    { "A_BrainExplode", (void *) A_BrainExplode },
++    { "A_BrainPain", (void *) A_BrainPain },
++    { "A_BrainScream", (void *) A_BrainScream },
++    { "A_BrainSpit", (void *) A_BrainSpit },
++    { "A_BruisAttack", (void *) A_BruisAttack },
++    { "A_BspiAttack", (void *) A_BspiAttack },
++    { "A_CPosAttack", (void *) A_CPosAttack },
++    { "A_CPosRefire", (void *) A_CPosRefire },
++    { "A_Chase", (void *) A_Chase },
++    { "A_CheckReload", (void *) A_CheckReload },
++    { "A_CloseShotgun2", (void *) A_CloseShotgun2 },
++    { "A_CyberAttack", (void *) A_CyberAttack },
++    { "A_Explode", (void *) A_Explode },
++    { "A_FaceTarget", (void *) A_FaceTarget },
++    { "A_Fall", (void *) A_Fall },
++    { "A_FatAttack1", (void *) A_FatAttack1 },
++    { "A_FatAttack2", (void *) A_FatAttack2 },
++    { "A_FatAttack3", (void *) A_FatAttack3 },
++    { "A_FatRaise", (void *) A_FatRaise },
++    { "A_Fire", (void *) A_Fire },
++    { "A_FireBFG", (void *) A_FireBFG },
++    { "A_FireCGun", (void *) A_FireCGun },
++    { "A_FireCrackle", (void *) A_FireCrackle },
++    { "A_FireMissile", (void *) A_FireMissile },
++    { "A_FirePistol", (void *) A_FirePistol },
++    { "A_FirePlasma", (void *) A_FirePlasma },
++    { "A_FireShotgun", (void *) A_FireShotgun },
++    { "A_FireShotgun2", (void *) A_FireShotgun2 },
++    { "A_GunFlash", (void *) A_GunFlash },
++    { "A_HeadAttack", (void *) A_HeadAttack },
++    { "A_Hoof", (void *) A_Hoof },
++    { "A_KeenDie", (void *) A_KeenDie },
++    { "A_Light0", (void *) A_Light0 },
++    { "A_Light1", (void *) A_Light1 },
++    { "A_Light2", (void *) A_Light2 },
++    { "A_LoadShotgun2", (void *) A_LoadShotgun2 },
++    { "A_Look", (void *) A_Look },
++    { "A_Lower", (void *) A_Lower },
++    { "A_Metal", (void *) A_Metal },
++    { "A_OpenShotgun2", (void *) A_OpenShotgun2 },
++    { "A_Pain", (void *) A_Pain },
++    { "A_PainAttack", (void *) A_PainAttack },
++    { "A_PainDie", (void *) A_PainDie },
++    { "A_PlayerScream", (void *) A_PlayerScream },
++    { "A_PosAttack", (void *) A_PosAttack },
++    { "A_Punch", (void *) A_Punch },
++    { "A_Raise", (void *) A_Raise },
++    { "A_ReFire", (void *) A_ReFire },
++    { "A_SPosAttack", (void *) A_SPosAttack },
++    { "A_SargAttack", (void *) A_SargAttack },
++    { "A_Saw", (void *) A_Saw },
++    { "A_Scream", (void *) A_Scream },
++    { "A_SkelFist", (void *) A_SkelFist },
++    { "A_SkelMissile", (void *) A_SkelMissile },
++    { "A_SkelWhoosh", (void *) A_SkelWhoosh },
++    { "A_SkullAttack", (void *) A_SkullAttack },
++    { "A_SpawnFly", (void *) A_SpawnFly },
++    { "A_SpawnSound", (void *) A_SpawnSound },
++    { "A_SpidRefire", (void *) A_SpidRefire },
++    { "A_StartFire", (void *) A_StartFire },
++    { "A_Tracer", (void *) A_Tracer },
++    { "A_TroopAttack", (void *) A_TroopAttack },
++    { "A_VileAttack", (void *) A_VileAttack },
++    { "A_VileChase", (void *) A_VileChase },
++    { "A_VileStart", (void *) A_VileStart },
++    { "A_VileTarget", (void *) A_VileTarget },
++    { "A_WeaponReady", (void *) A_WeaponReady },
++    { "A_XScream", (void *) A_XScream },
++};
++
++
++static const char *ActionName(const state_t *s)
++{
++    size_t i;
++
++    if (s->action.acv == NULL)
++    {
++        return "NULL";
++    }
++    for (i = 0; i < sizeof(oracle_actions) / sizeof(oracle_actions[0]); ++i)
++    {
++        if ((void *) s->action.acv == oracle_actions[i].fn)
++        {
++            return oracle_actions[i].name;
++        }
++    }
++    return "UNKNOWN";
++}
++
++// Prints a string in double quotes; \, " and non-printable bytes are escaped.
++static void PrintQuoted(FILE *f, const char *s)
++{
++    const unsigned char *p = (const unsigned char *) s;
++
++    fputc('"', f);
++    for (; *p != '\0'; ++p)
++    {
++        if (*p == '\\') fputs("\\\\", f);
++        else if (*p == '"') fputs("\\\"", f);
++        else if (*p == '\n') fputs("\\n", f);
++        else if (*p < 0x20 || *p >= 0x7f) fprintf(f, "\\x%02x", *p);
++        else fputc(*p, f);
++    }
++    fputc('"', f);
++}
++
++typedef struct
++{
++    const char *name;
++    cheatseq_t *seq;
++} cheat_entry_t;
++
++static void PrintCheat(FILE *f, const char *name, const cheatseq_t *c)
++{
++    size_t i;
++
++    fprintf(f, "cheat \"%s\" len=%d params=%d seq=", name, (int) c->sequence_len,
++            c->parameter_chars);
++    // the sequence is raw bytes (DEHACKED may write any byte); print as hex
++    for (i = 0; i < c->sequence_len; ++i)
++    {
++        fprintf(f, "%02x", (unsigned char) c->sequence[i]);
++    }
++    fputs(" text=\"", f);
++    for (i = 0; i < c->sequence_len; ++i)
++    {
++        unsigned char ch = (unsigned char) c->sequence[i];
++        if (ch == '\\' || ch == '"') fprintf(f, "\\%c", ch);
++        else if (ch < 0x20 || ch >= 0x7f) fprintf(f, "\\x%02x", ch);
++        else fputc(ch, f);
++    }
++    fputs("\"\n", f);
++}
++
++void Oracle_DumpDefs(const char *filename)
++{
++    FILE *f = fopen(filename, "w");
++    int i;
++    static const char *const ammo_names[] = {"clip", "shell", "cell", "misl"};
++    cheat_entry_t cheats[] = {
++        {"Change music", &cheat_mus},
++        {"Chainsaw", &cheat_choppers},
++        {"God mode", &cheat_god},
++        {"Ammo & Keys", &cheat_ammo},
++        {"Ammo", &cheat_ammonokey},
++        {"No Clipping 1", &cheat_noclip},
++        {"No Clipping 2", &cheat_commercial_noclip},
++        {"Invincibility", &cheat_powerup[0]},
++        {"Berserk", &cheat_powerup[1]},
++        {"Invisibility", &cheat_powerup[2]},
++        {"Radiation Suit", &cheat_powerup[3]},
++        {"Auto-map", &cheat_powerup[4]},
++        {"Lite-Amp Goggles", &cheat_powerup[5]},
++        {"BEHOLD menu", &cheat_powerup[6]},
++        {"Level Warp", &cheat_clev},
++        {"Player Position", &cheat_mypos},
++        {"Map cheat", &cheat_amap},
++    };
++
++    if (f == NULL)
++    {
++        I_Error("oracle: cannot open %s for writing", filename);
++    }
++    Oracle_WriteHeader(f, "doom-defs v1");
++    fprintf(f, "nodeh %d\n", M_ParmExists("-nodeh") ? 1 : 0);
++
++    fprintf(f, "sprites %d\n", (int) NUMSPRITES);
++    for (i = 0; i < NUMSPRITES; ++i)
++    {
++        fprintf(f, "sprite %d %s\n", i, sprnames[i] != NULL ? sprnames[i] : "NULL");
++    }
++
++    fprintf(f, "states %d\n", (int) NUMSTATES);
++    for (i = 0; i < NUMSTATES; ++i)
++    {
++        const state_t *s = &states[i];
++        fprintf(f, "state %d sprite=%d frame=%d tics=%d action=%s next=%d misc1=%d misc2=%d\n", i,
++                (int) s->sprite, s->frame, s->tics, ActionName(s), (int) s->nextstate,
++                s->misc1, s->misc2);
++    }
++
++    fprintf(f, "mobjinfo %d\n", (int) NUMMOBJTYPES);
++    for (i = 0; i < NUMMOBJTYPES; ++i)
++    {
++        const mobjinfo_t *m = &mobjinfo[i];
++        fprintf(f,
++                "mobj %d doomednum=%d spawnstate=%d spawnhealth=%d seestate=%d seesound=%d "
++                "reactiontime=%d attacksound=%d painstate=%d painchance=%d painsound=%d "
++                "meleestate=%d missilestate=%d deathstate=%d xdeathstate=%d deathsound=%d "
++                "speed=%d radius=%d height=%d mass=%d damage=%d activesound=%d flags=%d "
++                "raisestate=%d\n",
++                i, m->doomednum, m->spawnstate, m->spawnhealth, m->seestate, m->seesound,
++                m->reactiontime, m->attacksound, m->painstate, m->painchance, m->painsound,
++                m->meleestate, m->missilestate, m->deathstate, m->xdeathstate, m->deathsound,
++                m->speed, m->radius, m->height, m->mass, m->damage, m->activesound, m->flags,
++                m->raisestate);
++    }
++
++    fprintf(f, "weaponinfo %d\n", (int) NUMWEAPONS);
++    for (i = 0; i < NUMWEAPONS; ++i)
++    {
++        const weaponinfo_t *w = &weaponinfo[i];
++        fprintf(f, "weapon %d ammo=%d upstate=%d downstate=%d readystate=%d atkstate=%d "
++                   "flashstate=%d\n",
++                i, (int) w->ammo, w->upstate, w->downstate, w->readystate, w->atkstate,
++                w->flashstate);
++    }
++
++    fprintf(f, "ammo %d\n", (int) NUMAMMO);
++    for (i = 0; i < NUMAMMO; ++i)
++    {
++        fprintf(f, "ammo %d name=%s max=%d clip=%d\n", i, ammo_names[i], maxammo[i], clipammo[i]);
++    }
++
++    fprintf(f, "sounds %d\n", (int) NUMSFX);
++    for (i = 0; i < NUMSFX; ++i)
++    {
++        const sfxinfo_t *s = &S_sfx[i];
++        fprintf(f, "sfx %d name=%s priority=%d link=%d pitch=%d volume=%d\n", i, s->name,
++                s->priority, s->link == NULL ? -1 : (int) (s->link - S_sfx), s->pitch,
++                s->volume);
++    }
++
++    fprintf(f, "music %d\n", (int) NUMMUSIC);
++    for (i = 0; i < NUMMUSIC; ++i)
++    {
++        fprintf(f, "mus %d name=%s\n", i, S_music[i].name != NULL ? S_music[i].name : "NULL");
++    }
++
++    fputs("misc\n", f);
++    fprintf(f, "initial_health %d\n", deh_initial_health);
++    fprintf(f, "initial_bullets %d\n", deh_initial_bullets);
++    fprintf(f, "max_health %d\n", deh_max_health);
++    fprintf(f, "max_armor %d\n", deh_max_armor);
++    fprintf(f, "green_armor_class %d\n", deh_green_armor_class);
++    fprintf(f, "blue_armor_class %d\n", deh_blue_armor_class);
++    fprintf(f, "max_soulsphere %d\n", deh_max_soulsphere);
++    fprintf(f, "soulsphere_health %d\n", deh_soulsphere_health);
++    fprintf(f, "megasphere_health %d\n", deh_megasphere_health);
++    fprintf(f, "god_mode_health %d\n", deh_god_mode_health);
++    fprintf(f, "idfa_armor %d\n", deh_idfa_armor);
++    fprintf(f, "idfa_armor_class %d\n", deh_idfa_armor_class);
++    fprintf(f, "idkfa_armor %d\n", deh_idkfa_armor);
++    fprintf(f, "idkfa_armor_class %d\n", deh_idkfa_armor_class);
++    fprintf(f, "bfg_cells_per_shot %d\n", deh_bfg_cells_per_shot);
++    fprintf(f, "species_infighting %d\n", deh_species_infighting);
++
++    fprintf(f, "cheats %d\n", (int) (sizeof(cheats) / sizeof(cheats[0])));
++    for (i = 0; i < (int) (sizeof(cheats) / sizeof(cheats[0])); ++i)
++    {
++        PrintCheat(f, cheats[i].name, cheats[i].seq);
++    }
++
++    DEH_DumpStrings(f);
++    fputs("end\n", f);
++    fclose(f);
++}
+diff --git a/src/doom/oracle_frame.c b/src/doom/oracle_frame.c
+new file mode 100644
+index 0000000..2dbabc2
+--- /dev/null
++++ b/src/doom/oracle_frame.c
+@@ -0,0 +1,205 @@
++//
++// Test-oracle extensions for the doom-java project: frame + scene sidecar dump (-dumpframe).
++// See tools/oracle/FORMAT.md.
++//
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdint.h>
++
++#include "doomtype.h"
++#include "doomstat.h"
++#include "doomdef.h"
++#include "d_player.h"
++#include "i_system.h"
++#include "i_video.h"
++#include "info.h"
++#include "m_argv.h"
++#include "m_menu.h"
++#include "m_misc.h"
++#include "p_local.h"
++#include "p_mobj.h"
++#include "p_pspr.h"
++#include "r_data.h"
++#include "r_defs.h"
++#include "r_main.h"
++#include "r_sky.h"
++#include "r_state.h"
++
++#include "oracle.h"
++
++extern int fuzzpos;
++extern boolean automapactive;
++extern int numtextures;
++
++static int *dump_tics = NULL;
++static int dump_count = 0;
++static int dump_next = 0;
++static char dump_dir[1024];
++static int fuzzpos_at_start = 0;
++
++void Oracle_DumpFrameInit(const char *list, const char *dir)
++{
++    char *copy = strdup(list);
++    char *tok;
++    int i, j;
++
++    M_StringCopy(dump_dir, dir, sizeof(dump_dir));
++    for (tok = strtok(copy, ","); tok != NULL; tok = strtok(NULL, ","))
++    {
++        dump_tics = realloc(dump_tics, (dump_count + 1) * sizeof(int));
++        dump_tics[dump_count++] = atoi(tok);
++    }
++    free(copy);
++    // sort ascending
++    for (i = 0; i < dump_count; ++i)
++    {
++        for (j = i + 1; j < dump_count; ++j)
++        {
++            if (dump_tics[j] < dump_tics[i])
++            {
++                int t = dump_tics[i];
++                dump_tics[i] = dump_tics[j];
++                dump_tics[j] = t;
++            }
++        }
++    }
++    M_MakeDirectory(dump_dir);
++}
++
++void Oracle_BeforeDisplay(void)
++{
++    fuzzpos_at_start = fuzzpos;
++}
++
++static void PrintSprite(FILE *f, const char *tag, const pspdef_t *ps)
++{
++    if (ps->state == NULL)
++    {
++        fprintf(f, "psprite %s -1 -1 %d %d\n", tag, ps->sx, ps->sy);
++    }
++    else
++    {
++        fprintf(f, "psprite %s %d %d %d %d\n", tag, (int) ps->state->sprite,
++                ps->state->frame, ps->sx, ps->sy);
++    }
++}
++
++static void WriteScene(FILE *f, int real_tic, int requested, const char *rawname)
++{
++    player_t *vp = &players[displayplayer];
++    int i;
++
++    Oracle_WriteHeader(f, "doom-scene v1");
++    fprintf(f, "tic %d requested %d gametic %d gamestate %d automap %d leveltime %d\n",
++            real_tic, requested, gametic, (int) gamestate, automapactive ? 1 : 0, leveltime);
++    fprintf(f, "raw %s %d %d\n", rawname, SCREENWIDTH, SCREENHEIGHT);
++    fprintf(f, "view %d %d %d %d %d %d %d %d\n", viewx, viewy, viewz, (int32_t) viewangle,
++            extralight, vp->fixedcolormap, displayplayer, consoleplayer);
++    fprintf(f, "window %d %d %d %d %d %d %d\n", viewwindowx, viewwindowy, scaledviewwidth,
++            viewheight, detailshift, screenblocks, usegamma);
++    fprintf(f, "palette %d\n", ST_GetPaletteIndex());
++    fprintf(f, "fuzzpos %d\n", fuzzpos_at_start);
++    fprintf(f, "sky %d %d\n", skytexture, skyflatnum);
++    fprintf(f, "powers");
++    for (i = 0; i < NUMPOWERS; ++i)
++    {
++        fprintf(f, " %d", vp->powers[i]);
++    }
++    fputc('\n', f);
++    PrintSprite(f, "weapon", &vp->psprites[ps_weapon]);
++    PrintSprite(f, "flash", &vp->psprites[ps_flash]);
++
++    fprintf(f, "texturetranslation %d", numtextures);
++    for (i = 0; i < numtextures; ++i)
++    {
++        fprintf(f, " %d", texturetranslation[i]);
++    }
++    fputc('\n', f);
++    fprintf(f, "flattranslation %d", numflats);
++    for (i = 0; i < numflats; ++i)
++    {
++        fprintf(f, " %d", flattranslation[i]);
++    }
++    fputc('\n', f);
++
++    fprintf(f, "sectors %d\n", numsectors);
++    for (i = 0; i < numsectors; ++i)
++    {
++        sector_t *s = &sectors[i];
++        fprintf(f, "S %d %d %d %d %d %d\n", i, s->floorheight, s->ceilingheight, s->floorpic,
++                s->ceilingpic, s->lightlevel);
++    }
++    fprintf(f, "sides %d\n", numsides);
++    for (i = 0; i < numsides; ++i)
++    {
++        side_t *sd = &sides[i];
++        fprintf(f, "D %d %d %d %d %d %d\n", i, sd->textureoffset, sd->rowoffset,
++                sd->toptexture, sd->bottomtexture, sd->midtexture);
++    }
++
++    {
++        int count = 0;
++        for (i = 0; i < numsectors; ++i)
++        {
++            mobj_t *mo;
++            for (mo = sectors[i].thinglist; mo != NULL; mo = mo->snext)
++            {
++                ++count;
++            }
++        }
++        fprintf(f, "things %d\n", count);
++        for (i = 0; i < numsectors; ++i)
++        {
++            mobj_t *mo;
++            for (mo = sectors[i].thinglist; mo != NULL; mo = mo->snext)
++            {
++                fprintf(f, "T %d %d %d %d %d %d %d %d %d\n", i, mo->x, mo->y, mo->z,
++                        (int32_t) mo->angle, (int) mo->sprite, mo->frame, mo->flags,
++                        mo->player == NULL ? -1 : (int) (mo->player - players));
++            }
++        }
++    }
++    fprintf(f, "end\n");
++}
++
++// Called after every D_Display() that is not part of a wipe. Writes the frame when the
++// last completed tic reached the next requested tic.
++void Oracle_AfterDisplay(void)
++{
++    char path[1100];
++    char rawname[64];
++    FILE *f;
++    int requested;
++
++    if (dump_next >= dump_count || oracle_last_tic < dump_tics[dump_next])
++    {
++        return;
++    }
++    requested = dump_tics[dump_next];
++    // One frame satisfies every requested tic up to the real one.
++    while (dump_next < dump_count && dump_tics[dump_next] <= oracle_last_tic)
++    {
++        ++dump_next;
++    }
++
++    snprintf(rawname, sizeof(rawname), "frame-%06d.raw", oracle_last_tic);
++    snprintf(path, sizeof(path), "%s/%s", dump_dir, rawname);
++    f = fopen(path, "wb");
++    if (f == NULL)
++    {
++        I_Error("oracle: cannot write %s", path);
++    }
++    fwrite(I_VideoBuffer, 1, SCREENWIDTH * SCREENHEIGHT, f);
++    fclose(f);
++
++    snprintf(path, sizeof(path), "%s/frame-%06d.scene", dump_dir, oracle_last_tic);
++    f = fopen(path, "w");
++    if (f == NULL)
++    {
++        I_Error("oracle: cannot write %s", path);
++    }
++    WriteScene(f, oracle_last_tic, requested, rawname);
++    fclose(f);
++}
+diff --git a/src/doom/st_stuff.c b/src/doom/st_stuff.c
+index da9b8bc..2e3a971 100644
+--- a/src/doom/st_stuff.c
++++ b/src/doom/st_stuff.c
+@@ -879,6 +879,11 @@ void ST_Ticker (void)
+ 
+ static int st_palette = 0;
+ 
++int ST_GetPaletteIndex(void)
++{
++    return st_palette;
++}
++
+ void ST_doPaletteStuff(void)
+ {
+ 
+diff --git a/src/z_zone.c b/src/z_zone.c
+index c5c2dbf..c8a22c8 100644
+--- a/src/z_zone.c
++++ b/src/z_zone.c
+@@ -340,6 +340,14 @@ Z_Malloc
+ 
+     result  = (void *) ((byte *)base + sizeof(memblock_t));
+ 
++    // Oracle: special-thinker structs (doors, floors, plats...) leave some fields
++    // uninitialised in vanilla (e.g. plat_t.count, floormove_t.texture). Zero them so the
++    // trace is reproducible; no vanilla code depends on the garbage.
++    if (tag == PU_LEVSPEC)
++    {
++        memset(result, 0, size - sizeof(memblock_t));
++    }
++
+     if (base->user)
+     {
+         *base->user = result;

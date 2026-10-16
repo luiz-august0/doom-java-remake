@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Runs the game in Docker: bin/doom-docker [--x11] [--build] [--image <name>] [game options]
+#
+#   bin/doom-docker -iwad freedoom2.wad -warp 1     browser mode: open http://localhost:6080 (Mac, Windows, Linux)
+#   bin/doom-docker --x11                           Linux only: a window on the host's X server, with sound
+#   bin/doom-docker --build                         builds the image from this checkout first
+#
+# Environment: DOOM_DOCKER_IMAGE (default ghcr.io/luiz-august0/doom-java-remake, or "doom-java" with --build),
+#              DOOM_PORT (browser mode host port, default 6080), DOOM_GEOMETRY (default 1280x800),
+#              DOOM_DATA_VOLUME (browser mode: docker volume for config and saves, default doom-java-data;
+#              with --x11 they live in ~/.config/doom-java on the host).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IMAGE="${DOOM_DOCKER_IMAGE:-ghcr.io/luiz-august0/doom-java-remake}"
+PORT="${DOOM_PORT:-6080}"
+VOLUME="${DOOM_DATA_VOLUME:-doom-java-data}"
+X11=0
+BUILD=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --x11) X11=1; shift ;;
+    --build) BUILD=1; shift ;;
+    --image) IMAGE="$2"; shift 2 ;;
+    -h|--help)
+      sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *) break ;;
+  esac
+done
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "doom-docker: docker is not installed" >&2
+  exit 1
+fi
+
+if [[ "$BUILD" == "1" ]]; then
+  IMAGE="${DOOM_DOCKER_IMAGE:-doom-java}"
+  docker build -t "$IMAGE" "$ROOT"
+fi
+
+args=(run --rm)
+[[ -t 0 && -t 1 ]] && args+=(-it)
+
+if [[ "$X11" == "1" ]]; then
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "doom-docker: --x11 needs a Linux host with an X server (use browser mode instead)" >&2
+    exit 1
+  fi
+  : "${DISPLAY:?doom-docker: DISPLAY is not set}"
+  args+=(-e DOOM_MODE=x11 -e "DISPLAY=$DISPLAY" -v /tmp/.X11-unix:/tmp/.X11-unix:ro)
+  # the X server must accept the container's user (local connections of the current user)
+  if command -v xhost >/dev/null 2>&1; then
+    xhost +SI:localuser:"$(id -un)" >/dev/null 2>&1 || true
+  fi
+  [[ -e /dev/dri ]] && args+=(--device /dev/dri)
+  if [[ -e /dev/snd ]]; then args+=(--device /dev/snd --group-add audio); fi
+  # PulseAudio / PipeWire-pulse socket of the current user
+  PULSE_SOCKET="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse/native"
+  if [[ -S "$PULSE_SOCKET" ]]; then
+    args+=(-e PULSE_SERVER=unix:/tmp/pulse-native -v "$PULSE_SOCKET:/tmp/pulse-native")
+    [[ -f "$HOME/.config/pulse/cookie" ]] && args+=(-v "$HOME/.config/pulse/cookie:/tmp/pulse-cookie:ro" -e PULSE_COOKIE=/tmp/pulse-cookie)
+  fi
+  # the sockets belong to the host user: run as that user, keeping config and saves in the host's config directory
+  HOST_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/doom-java"
+  mkdir -p "$HOST_CONFIG"
+  args+=(--user "$(id -u):$(id -g)" -e HOME=/tmp/doom-home -e XDG_CONFIG_HOME=/config -v "$HOST_CONFIG:/config/doom-java")
+else
+  args+=(-v "$VOLUME:/home/doom/.config/doom-java" -p "$PORT:6080" -e "DOOM_GEOMETRY=${DOOM_GEOMETRY:-1280x800}")
+  echo "doom-docker: open http://localhost:$PORT" >&2
+fi
+
+exec docker "${args[@]}" "$IMAGE" "$@"

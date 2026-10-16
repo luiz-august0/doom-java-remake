@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Development viewer (W1-E): shows TITLEPIC (or another picture) of an IWAD through Canvas2D and the LWJGL backend.
+# Usage: bin/viewer [options] <iwad>      (see doom.app.viewer.Viewer for the options)
+# Environment: VIEWER_NO_BUILD=1 skips the Maven step (uses the classpath cached by the last run).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CP_FILE="$ROOT/doom-app/target/viewer-classpath.txt"
+
+if [[ "${VIEWER_NO_BUILD:-}" != "1" || ! -f "$CP_FILE" ]]; then
+  mkdir -p "$ROOT/doom-app/target"
+  (cd "$ROOT" && ./mvnw -o -q -pl doom-app -am compile dependency:build-classpath \
+      -Dmdep.outputFile="$CP_FILE" -Dmdep.includeScope=runtime)
+fi
+
+# Module path: reactor output directories + runtime dependencies, without test-only libraries.
+MODULE_PATH="$ROOT/doom-app/target/classes"
+IFS=':' read -r -a ENTRIES < "$CP_FILE" || true  # the file has no trailing newline
+for e in "${ENTRIES[@]}"; do
+  case "$e" in
+    *junit*|*assertj*|*opentest4j*|*apiguardian*|*byte-buddy*) ;;
+    *) MODULE_PATH="$MODULE_PATH:$e" ;;
+  esac
+done
+
+# Flags verified on JDK 25 (see docs/notes/platform.md).
+JVM_FLAGS=(--enable-native-access=org.lwjgl,org.lwjgl.glfw,org.lwjgl.opengl)
+if [[ "$(uname -s)" == "Darwin" && "${VIEWER_NO_FIRST_THREAD:-}" != "1" ]]; then
+  JVM_FLAGS+=(-XstartOnFirstThread)
+fi
+
+exec java "${JVM_FLAGS[@]}" ${VIEWER_JVM_OPTS:-} --module-path "$MODULE_PATH" -m doom.app/doom.app.viewer.Viewer "$@"

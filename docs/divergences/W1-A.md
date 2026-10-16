@@ -1,0 +1,18 @@
+# Divergences recorded by W1-A (WAD format layer, level geometry loader)
+
+| area | original behaviour | ours | reason | reference |
+|---|---|---|---|---|
+| Map lumps | `P_SetupLevel` reads `lumpnum + ML_*` without checking the lump names | `MapData.load` verifies that THINGS ... BLOCKMAP follow the marker and throws `WadFormatException` otherwise | A mis-ordered PWAD would load garbage in vanilla; a clear error is better and no IWAD map is affected | p_setup.c:P_SetupLevel |
+| Level loading | Out-of-range indices (vertex, sidedef, sector, linedef, subsector, node child, blockmap offset/line number) read arbitrary memory or crash | `WadFormatException` naming file, lump and index (spec 02 §9) | Memory-safe loader; maps that load in vanilla are unaffected | p_setup.c |
+| Level loading | A linedef without a front sidedef dereferences NULL in `P_GroupLines` (crash) | `WadFormatException` | Same as above | p_setup.c:P_GroupLines |
+| Segs | Back sector of a two-sided line whose back side is missing ("glass hack") is the sector at DOS address 0 (`GetSectorAtNullAddress`) | Same sector (heights `0x00199257` / `0x007006F4`, DOS 6.22 memory dump, Chocolate's default); in `WorldView.segBackSector` it is reported as index `-1`, the same as a one-sided line | `WorldView` has no index for a sector that is not in SECTORS | p_setup.c:P_LoadSegs, i_system.c:I_GetMemoryValue |
+| Reject | A short REJECT lump is padded with the zone-block header of the next allocation (`PadRejectArray`), the rest with 0, or 0xFF under `-reject_pad_with_ff` | Same padding; `-reject_pad_with_ff` is not supported | Rare PWAD compatibility option | p_setup.c:PadRejectArray |
+| Map lumps | A trailing partial record is ignored (`length / sizeof`) | Same | Vanilla behaviour kept (no divergence) | p_setup.c |
+| Flats | `R_FlatNumForName` does not range-check; a sector may use any lump as a flat | The loader requires the flat to be inside F_START..F_END | A non-flat lump would index `flattranslation[]` out of range | r_data.c:R_FlatNumForName |
+| Textures | `R_InitTextures` accepts any texture directory offset not above the lump length and any patch index | Offsets must leave room for the header and all patches; patch indices must be below the PNAMES count; negative sizes rejected | Memory safety | r_data.c:R_InitTextures |
+| Sky texture | `skytexture` is chosen in `G_InitNew` from the first map of the game (never changes in a Doom II session) | `LevelGeometryLoader` picks the sky of the loaded map's own episode or map number | A geometry-only load has no game history; the session (W2-A) must apply the `G_InitNew` rule | g_game.c:G_InitNew |
+| Things | `P_LoadThings` stops at the first Doom II-only monster in non-commercial modes (`break`, a vanilla bug that Chocolate keeps) | `Level.things` holds all THINGS entries; the spawner (W2-A) must reproduce the `break` | Parsing and spawning are separate | p_setup.c:P_LoadThings |
+| Demos | Pre-1.4 headerless demos (versions 0-4) and the 1.91 long-tics format (111) are handled by Chocolate | Rejected with "Demo is from a different game version" | Out of scope (D-001) | g_game.c:G_DoPlayDemo |
+| Demos | A missing end marker reads past the buffer | Accepted; `Demo.hasEndMarker()` is false; a partial last tic is an error | Robustness | g_game.c:G_ReadDemoTiccmd |
+| Demos | Recording stops when the buffer is full | `DemoWriter` has no limit | See D-004 | g_game.c:G_WriteDemoTiccmd |
+| IWAD identification | Chocolate inspects demo lumps to select executables older than v1.9 | Not emulated: such IWADs are identified as v1.9 | Out of scope for v1 | d_main.c:InitGameVersion |

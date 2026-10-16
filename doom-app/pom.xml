@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>dev.doomjava</groupId>
+    <artifactId>doom-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>doom-app</artifactId>
+  <name>doom-app</name>
+  <description>Application entry point and launch wiring.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>dev.doomjava</groupId>
+      <artifactId>doom-engine</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.doomjava</groupId>
+      <artifactId>doom-platform-lwjgl</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>dev.doomjava</groupId>
+      <artifactId>doom-platform-javasound</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+  </dependencies>
+  <profiles>
+    <!--
+      Distribution (./mvnw -Pdist -pl doom-app -am package -DskipTests):
+        target/doom-java-<version>-all.jar   fat jar for developers: java [-XstartOnFirstThread] -jar ...
+        target/dist/runtime                  jlink runtime image (JDK modules only)
+        target/dist/mods                     application + LWJGL jars (module path)
+        target/dist/installer/               jpackage output (.dmg on macOS, .msi on Windows, app-image on Linux)
+        target/dist/app-content/iwads        the shareware doom1.wad that jpackage embeds in the application (ADR-023)
+        target/dist/portable/                zip per OS: jlink image + iwads/doom1.wad + launcher; and the fat jar zip
+      The tests are not run by this profile; run them first (verify without -Pdist).
+    -->
+    <profile>
+      <id>dist</id>
+      <build>
+        <plugins>
+          <!-- Fat jar. ServiceLoader on the class path needs META-INF/services, which the modules do not ship (they use
+               module-info "provides"): the three entries live in src/dist/services and are added here only, so that
+               class-path test runs of the other modules keep their current behaviour. -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-shade-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>fat-jar</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>shade</goal>
+                </goals>
+                <configuration>
+                  <shadedArtifactAttached>true</shadedArtifactAttached>
+                  <shadedClassifierName>all</shadedClassifierName>
+                  <createDependencyReducedPom>false</createDependencyReducedPom>
+                  <filters>
+                    <filter>
+                      <artifact>*:*</artifact>
+                      <excludes>
+                        <exclude>module-info.class</exclude>
+                        <exclude>META-INF/versions/*/module-info.class</exclude>
+                        <exclude>META-INF/MANIFEST.MF</exclude>
+                        <exclude>META-INF/*.SF</exclude>
+                        <exclude>META-INF/*.DSA</exclude>
+                        <exclude>META-INF/*.RSA</exclude>
+                      </excludes>
+                    </filter>
+                  </filters>
+                  <transformers>
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                      <manifestEntries>
+                        <Main-Class>doom.app.Main</Main-Class>
+                        <Multi-Release>true</Multi-Release>
+                        <Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>
+                      </manifestEntries>
+                    </transformer>
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.IncludeResourceTransformer">
+                      <resource>META-INF/services/doom.platform.PlatformProvider</resource>
+                      <file>${project.basedir}/src/dist/services/doom.platform.PlatformProvider</file>
+                    </transformer>
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.IncludeResourceTransformer">
+                      <resource>META-INF/services/doom.platform.AudioProvider</resource>
+                      <file>${project.basedir}/src/dist/services/doom.platform.AudioProvider</file>
+                    </transformer>
+                    <transformer implementation="org.apache.maven.plugins.shade.resource.IncludeResourceTransformer">
+                      <resource>META-INF/services/java.lang.System$LoggerFinder</resource>
+                      <file>${project.basedir}/src/dist/services/java.lang.System$LoggerFinder</file>
+                    </transformer>
+                  </transformers>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <!-- The application and LWJGL jars, as a module path directory (jpackage input). -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-dependency-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>collect-modules</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>copy-dependencies</goal>
+                </goals>
+                <configuration>
+                  <outputDirectory>${project.build.directory}/dist/mods</outputDirectory>
+                  <includeScope>runtime</includeScope>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-resources-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>collect-app-jar</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>copy-resources</goal>
+                </goals>
+                <configuration>
+                  <outputDirectory>${project.build.directory}/dist/mods</outputDirectory>
+                  <resources>
+                    <resource>
+                      <directory>${project.build.directory}</directory>
+                      <includes>
+                        <include>${project.build.finalName}.jar</include>
+                      </includes>
+                    </resource>
+                  </resources>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <!-- The shareware IWAD that jpackage embeds in the application (jpackage app-content option); IwadLocator finds it without -iwad. -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-resources-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>stage-iwads</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>copy-resources</goal>
+                </goals>
+                <configuration>
+                  <outputDirectory>${project.build.directory}/dist/app-content/iwads</outputDirectory>
+                  <resources>
+                    <resource>
+                      <directory>${project.basedir}/../.iwads</directory>
+                      <includes>
+                        <include>doom1.wad</include>
+                      </includes>
+                    </resource>
+                  </resources>
+                  <nonFilteredFileExtensions>
+                    <nonFilteredFileExtension>wad</nonFilteredFileExtension>
+                  </nonFilteredFileExtensions>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <!-- Self-contained runtime image: the JDK modules the game needs plus doom.app and its module graph (LWJGL
+               included). Written to target/dist/runtime/classifiers/runtime. -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-jlink-plugin</artifactId>
+            <extensions>true</extensions>
+            <executions>
+              <execution>
+                <id>runtime-image</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>jlink</goal>
+                </goals>
+                <configuration>
+                  <classifier>runtime</classifier>
+                  <stripDebug>true</stripDebug>
+                  <noHeaderFiles>true</noHeaderFiles>
+                  <noManPages>true</noManPages>
+                  <compress>zip-6</compress>
+                  <outputDirectoryImage>${project.build.directory}/dist/runtime</outputDirectoryImage>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <!-- Installer: jpackage over the runtime image. The JVM flags are the ones bin/doom-java uses
+               (docs/notes/platform.md). Type per OS: see dist.jpackage.type in the parent POM. -->
+          <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>exec-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>jpackage</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>exec</goal>
+                </goals>
+                <configuration>
+                  <executable>${dist.jpackage.exe}</executable>
+                  <arguments>
+                    <argument>--type</argument>
+                    <argument>${dist.jpackage.type}</argument>
+                    <argument>--name</argument>
+                    <argument>${dist.app.name}</argument>
+                    <argument>--app-version</argument>
+                    <argument>${dist.app.version}</argument>
+                    <argument>--vendor</argument>
+                    <argument>${dist.app.vendor}</argument>
+                    <argument>--description</argument>
+                    <argument>${project.parent.description}</argument>
+                    <argument>--runtime-image</argument>
+                    <argument>${project.build.directory}/dist/runtime/classifiers/runtime</argument>
+                    <argument>--module</argument>
+                    <argument>doom.app/doom.app.Main</argument>
+                    <argument>--java-options</argument>
+                    <argument>${dist.jvm.first.thread}</argument>
+                    <argument>--java-options</argument>
+                    <argument>--enable-native-access=org.lwjgl,org.lwjgl.glfw,org.lwjgl.opengl</argument>
+                    <argument>--app-content</argument>
+                    <argument>${project.build.directory}/dist/app-content/iwads</argument>
+                    <argument>--license-file</argument>
+                    <argument>${project.basedir}/../LICENSE</argument>
+                    <argument>--dest</argument>
+                    <argument>${project.build.directory}/dist/installer</argument>
+                  </arguments>
+                </configuration>
+              </execution>
+              <!-- Portable zips (no installer, no Java needed): see src/dist/make-portable.sh. Needs bash (Git Bash on Windows)
+                   and zip (macOS, Linux). -Ddist.portable.skip=true skips it. -->
+              <execution>
+                <id>portable</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>exec</goal>
+                </goals>
+                <configuration>
+                  <skip>${dist.portable.skip}</skip>
+                  <executable>bash</executable>
+                  <arguments>
+                    <argument>${project.basedir}/src/dist/make-portable.sh</argument>
+                    <argument>${project.basedir}</argument>
+                    <argument>${dist.app.version}</argument>
+                  </arguments>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>
