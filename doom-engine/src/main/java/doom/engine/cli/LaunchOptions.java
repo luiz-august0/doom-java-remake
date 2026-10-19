@@ -131,7 +131,9 @@ public record LaunchOptions(String iwad, List<String> files, List<String> merge,
     /** The usage text for {@code -help}. */
     public static String usage() {
         return """
-                usage: doom-java [options]
+                usage: doom-java [files...] [options]
+
+                  files                    .wad (IWAD → -iwad, PWAD → -merge), .deh/.bex (-deh), .lmp (-playdemo)
 
                   -iwad <file>             IWAD to use (otherwise searched: DOOMWADDIR, DOOMWADPATH, ., data directory)
                   -file <files...>         PWADs (and .deh patches) to load

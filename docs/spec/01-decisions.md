@@ -331,7 +331,7 @@ Details in [09](09-testing-quality.md).
 **Status:** accepted.
 
 **Decision.** Minimal runtime via `maven-jlink-plugin` (game modules + `java.base`, `java.desktop` for audio, `jdk.unsupported` if LWJGL requires it) and installers via `jpackage` (called through `exec-maven-plugin`):
-`.dmg` (macOS arm64 and x64, with `-XstartOnFirstThread`), `.msi` (Windows x64) and `.deb`/`.tar.gz` (Linux x64/arm64). Matrix build on GitHub Actions.
+`.dmg` (macOS arm64 and x64, with `-XstartOnFirstThread`), `.exe` (Windows x64; the user chooses the install folder, default `C:\Program Files\DoomJava`, and `.wad` files open the game) and `.deb`/`.tar.gz` (Linux x64/arm64). Matrix build on GitHub Actions.
 There will also be a *fat jar* for developers (`java -jar`).
 
 ---

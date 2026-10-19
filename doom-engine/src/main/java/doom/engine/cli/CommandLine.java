@@ -30,7 +30,7 @@ public final class CommandLine {
         return args;
     }
 
-    private static boolean isParameter(String s) {
+    static boolean isParameter(String s) {
         return s.length() > 1 && s.charAt(0) == '-' && !isNumber(s);
     }
 

@@ -2,6 +2,7 @@
 # Builds the portable zips of the dist profile (called by exec-maven-plugin after jlink and jpackage; ADR-023):
 #
 #   target/dist/portable/DoomJava-<version>-<os>-portable.zip   jlink runtime + iwads/doom1.wad + launcher
+#                                                               (Windows: the jpackage app-image, DoomJava.exe)
 #   target/dist/portable/DoomJava-<version>-<os>-jar.zip        fat jar + iwads/doom1.wad (needs a JDK 25)
 #
 # Usage: make-portable.sh <doom-app directory> <version>
@@ -13,6 +14,7 @@ VERSION="$2"
 ROOT="$(cd "$APP/.." && pwd)"
 DIST="$APP/target/dist"
 RUNTIME="$DIST/runtime/classifiers/runtime"
+APP_IMAGE="$DIST/app-image/DoomJava"
 OUT="$DIST/portable"
 
 case "$(uname -s)" in
@@ -29,6 +31,9 @@ if [[ "$OS" == windows && "${PROCESSOR_ARCHITECTURE:-}" == "ARM64" ]]; then ARCH
 LABEL="${DOOM_PORTABLE_LABEL:-$OS-$ARCH}"
 
 [[ -d "$RUNTIME" ]] || { echo "make-portable: $RUNTIME missing (run the jlink step first)" >&2; exit 1; }
+if [[ "$OS" == windows && ! -d "$APP_IMAGE" ]]; then
+  echo "make-portable: $APP_IMAGE missing (the jpackage-app-image step of the dist profile builds it)" >&2; exit 1
+fi
 FAT_JAR="$(ls "$APP"/target/doom-app-*-all.jar | head -n 1)"
 [[ -f "$ROOT/.iwads/doom1.wad" ]] || { echo "make-portable: $ROOT/.iwads/doom1.wad missing" >&2; exit 1; }
 
@@ -53,7 +58,8 @@ doom1.wad is the shareware episode of DOOM (v1.9) by id Software. It is redistri
 shareware terms: it may be copied freely as long as it is not altered and not sold on its own.
 
 To play something else, put another IWAD (doom2.wad, freedoom1.wad, ...) in this folder, or start the game with
--iwad <file>. Free alternatives: Freedoom, https://freedoom.github.io/
+the file: drop it on DoomJava.exe (Windows), or pass it on the command line (doom-java.sh freedoom1.wad, or
+-iwad <file>). Free alternatives: Freedoom, https://freedoom.github.io/
 TXT
 }
 
@@ -65,7 +71,11 @@ NAME="DoomJava-$VERSION-$LABEL"
 STAGE="$OUT/stage"
 PKG="$STAGE/$NAME"
 mkdir -p "$PKG"
-cp -R "$RUNTIME" "$PKG/runtime"
+if [[ "$OS" == windows ]]; then
+  cp -R "$APP_IMAGE/." "$PKG/" # DoomJava.exe, app/ (JVM options), runtime/
+else
+  cp -R "$RUNTIME" "$PKG/runtime"
+fi
 copy_common "$PKG"
 
 NATIVE_ACCESS="--enable-native-access=org.lwjgl,org.lwjgl.glfw,org.lwjgl.opengl"
@@ -74,7 +84,7 @@ case "$OS" in
     if [[ "$OS" == macos ]]; then LAUNCHER="doom-java.command"; else LAUNCHER="doom-java.sh"; fi
     {
       echo '#!/usr/bin/env bash'
-      echo '# Starts DOOM Java. Extra arguments go to the game, for example: ./'"$LAUNCHER"' -iwad freedoom2.wad -warp 1'
+      echo '# Starts DOOM Java. Extra arguments go to the game, for example: ./'"$LAUNCHER"' freedoom2.wad -warp 1'
       echo 'DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"'
       if [[ "$OS" == macos ]]; then
         echo '# Files downloaded with a browser are quarantined by macOS; this lets the bundled runtime start.'
@@ -89,14 +99,7 @@ case "$OS" in
     chmod 755 "$PKG/$LAUNCHER"
     ;;
   windows)
-    {
-      printf '@echo off\r\n'
-      printf 'rem Starts DOOM Java. Extra arguments go to the game, for example: doom-java.bat -iwad freedoom2.wad -warp 1\r\n'
-      printf 'set "DOOM_APP_DIR=%%~dp0"\r\n'
-      printf '"%%~dp0runtime\\bin\\java.exe" %s -m doom.app/doom.app.Main %%*\r\n' "$NATIVE_ACCESS"
-      printf 'if errorlevel 1 pause\r\n'
-    } >"$PKG/doom-java.bat"
-    ;;
+    ;; # DoomJava.exe comes with the app-image
 esac
 zip_dir "$STAGE" "$NAME" "$OUT/$NAME-portable.zip"
 rm -rf "$STAGE"

@@ -75,10 +75,12 @@
     <dist.app.name>DoomJava</dist.app.name>
     <dist.app.version>1.0.0</dist.app.version>
     <dist.app.vendor>doom-java</dist.app.vendor>
-    <!-- Overridden per OS below. app-image works everywhere; dmg (macOS), msi/exe (Windows, needs WiX), deb/rpm (Linux). -->
+    <!-- Overridden per OS below. app-image works everywhere; dmg (macOS), exe/msi (Windows, needs WiX), deb/rpm (Linux). -->
     <dist.jpackage.type>app-image</dist.jpackage.type>
-    <dist.jpackage.extra.opt>--description</dist.jpackage.extra.opt>
-    <dist.jpackage.extra.val>${project.description}</dist.jpackage.extra.val>
+    <!-- jpackage options of one OS (doom-app/src/dist/jpackage/*.args, paths relative to doom-app). -->
+    <dist.jpackage.argfile>${project.basedir}/src/dist/jpackage/app-image.args</dist.jpackage.argfile>
+    <!-- false (Windows) also builds an app-image (DoomJava.exe) for the portable zip. -->
+    <dist.jpackage.appimage.skip>true</dist.jpackage.appimage.skip>
     <dist.jpackage.exe>${java.home}/bin/jpackage</dist.jpackage.exe>
     <!-- true skips the portable zips of the dist profile (doom-app/src/dist/make-portable.sh). -->
     <dist.portable.skip>false</dist.portable.skip>
@@ -319,8 +321,7 @@
         <lwjgl.natives>natives-macos-arm64</lwjgl.natives>
         <dist.jpackage.type>dmg</dist.jpackage.type>
         <dist.jvm.first.thread>-XstartOnFirstThread</dist.jvm.first.thread>
-        <dist.jpackage.extra.opt>--license-file</dist.jpackage.extra.opt>
-        <dist.jpackage.extra.val>${project.basedir}/../LICENSE</dist.jpackage.extra.val>
+        <dist.jpackage.argfile>${project.basedir}/src/dist/jpackage/macos.args</dist.jpackage.argfile>
       </properties>
     </profile>
     <profile>
@@ -330,8 +331,7 @@
         <lwjgl.natives>natives-macos</lwjgl.natives>
         <dist.jpackage.type>dmg</dist.jpackage.type>
         <dist.jvm.first.thread>-XstartOnFirstThread</dist.jvm.first.thread>
-        <dist.jpackage.extra.opt>--license-file</dist.jpackage.extra.opt>
-        <dist.jpackage.extra.val>${project.basedir}/../LICENSE</dist.jpackage.extra.val>
+        <dist.jpackage.argfile>${project.basedir}/src/dist/jpackage/macos.args</dist.jpackage.argfile>
       </properties>
     </profile>
     <profile>
@@ -339,9 +339,10 @@
       <activation><os><family>windows</family><arch>amd64</arch></os></activation>
       <properties>
         <lwjgl.natives>natives-windows</lwjgl.natives>
+        <dist.jpackage.type>exe</dist.jpackage.type>
         <dist.jpackage.exe>${java.home}/bin/jpackage.exe</dist.jpackage.exe>
-        <dist.jpackage.extra.opt>--license-file</dist.jpackage.extra.opt>
-        <dist.jpackage.extra.val>${project.basedir}/../LICENSE</dist.jpackage.extra.val>
+        <dist.jpackage.argfile>${project.basedir}/src/dist/jpackage/windows.args</dist.jpackage.argfile>
+        <dist.jpackage.appimage.skip>false</dist.jpackage.appimage.skip>
       </properties>
     </profile>
     <profile>
@@ -349,9 +350,10 @@
       <activation><os><family>windows</family><arch>aarch64</arch></os></activation>
       <properties>
         <lwjgl.natives>natives-windows-arm64</lwjgl.natives>
+        <dist.jpackage.type>exe</dist.jpackage.type>
         <dist.jpackage.exe>${java.home}/bin/jpackage.exe</dist.jpackage.exe>
-        <dist.jpackage.extra.opt>--license-file</dist.jpackage.extra.opt>
-        <dist.jpackage.extra.val>${project.basedir}/../LICENSE</dist.jpackage.extra.val>
+        <dist.jpackage.argfile>${project.basedir}/src/dist/jpackage/windows.args</dist.jpackage.argfile>
+        <dist.jpackage.appimage.skip>false</dist.jpackage.appimage.skip>
       </properties>
     </profile>
     <profile>
