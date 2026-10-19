@@ -285,6 +285,32 @@ Build the oracle once with `tools/oracle/build.sh` (CMake and SDL2 needed); `bin
 `bin/doom-tools trace-diff` drive it. CI (`.github/workflows/ci.yml`) runs `mvnw verify` on Linux, macOS and Windows,
 then downloads Freedoom, builds the oracle and runs the sync suite.
 
+## Contributing
+
+doom-java is **free and open source software**, and contributions of every size are welcome: bug reports, fixes,
+tests, documentation, new features, ports and ideas.
+
+- **Found a bug or have a question?** [Open an issue](https://github.com/luiz-august0/doom-java-remake/issues).
+  Please include the OS, the Java version, the IWAD, the command line and the log
+  (`logs/doom-java.log` in the data directory). For a simulation desync, attach the demo or the `-trace` output.
+- **Want to send a change?** Pull requests are welcome:
+  1. Fork the repository and create a branch from `main` (`git checkout -b fix/short-description`).
+  2. Make the change, following the coding rules in [`docs/contracts.md`](docs/contracts.md) and the architecture in
+     [`docs/spec/`](docs/spec/00-overview.md). Keep the diff focused: one concern per pull request.
+  3. Add or update tests, and run `./mvnw verify` (and the integration tests when you touch the simulation or the
+     renderer, see [Testing](#testing)). Changes to the simulation must keep the demos in sync with the oracle.
+  4. Document deliberate differences from the original in [`docs/divergences.md`](docs/divergences.md).
+  5. Push the branch and open a pull request against `main`, describing what changed and why. Link the issue it
+     closes, if any.
+- **Big change or new feature?** Open an issue first to discuss it, so nobody spends time on something that does not fit
+  the project goals ([`docs/spec/00-overview.md`](docs/spec/00-overview.md)).
+- **Commit messages** are short and in the imperative mood, with the area first when it helps
+  (`Render: fix off-by-one in the visplane merge`).
+
+Be respectful and constructive with everyone in the community; harassment and personal attacks are not tolerated.
+
+By contributing you agree that your work is licensed under the same terms as the project (GPL v2, see below).
+
 ## License
 
 GNU General Public License, version 2 (see [`LICENSE`](LICENSE)). The project reproduces behaviour studied in id
