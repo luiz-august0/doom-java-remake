@@ -35,8 +35,8 @@ bin/doom-docker --x11
 
 **Portable release** (no Java needed): download `DoomJava-<version>-<os>-portable.zip` from the
 [releases page](https://github.com/luiz-august0/doom-java-remake/releases), unzip it and run the launcher inside:
-`doom-java.command` (macOS, double click; right-click, Open the first time), `doom-java.sh` (Linux) or `doom-java.bat`
-(Windows). It includes `doom1.wad`. The `.dmg` / `.msi` installers and the `...-jar.zip` (fat jar, needs JDK 25) include it too.
+`doom-java.command` (macOS, double click; right-click, Open the first time), `doom-java.sh` (Linux) or `DoomJava.exe`
+(Windows). It includes `doom1.wad`. The `.dmg` / `.exe` installers and the `...-jar.zip` (fat jar, needs JDK 25) include it too.
 
 **From source** (JDK 25):
 
@@ -93,8 +93,19 @@ current directory beats the bundled shareware.
 
 ## Run
 
-With an installer (macOS `.dmg`, Windows `.msi`, Linux archive) start **DoomJava**: it opens the bundled `doom1.wad`.
-To play another IWAD pass `-iwad` on the command line or copy it to the application data directory.
+With an installer (macOS `.dmg`, Windows `.exe`, Linux archive) start **DoomJava**: it opens the bundled `doom1.wad`.
+The Windows installer asks for the install folder (default `C:\Program Files\DoomJava`), adds Start menu and desktop
+shortcuts, and associates `.wad` files with the game.
+
+To play another WAD:
+
+- **Windows installer**: double-click the `.wad` file (or "Open with" DoomJava).
+- **Windows portable**: drop the `.wad` file on `DoomJava.exe`.
+- **Everywhere**: give the file on the command line, with or without `-iwad` (`doom-java.sh freedoom1.wad`,
+  `DoomJava.exe C:\wads\doom2.wad`), or copy it to the `iwads/` folder or the application data directory.
+
+A file given without a parameter is used by type: a `.wad` whose header is `IWAD` becomes `-iwad`, other `.wad` files
+`-merge`, `.deh`/`.bex` `-deh` and `.lmp` `-playdemo`; explicit parameters still win.
 
 From source:
 
@@ -123,12 +134,13 @@ Installer for the current OS (the `dist` profile; also produces the fat jar abov
 ```sh
 ./mvnw -Pdist -pl doom-app -am package -DskipTests
 # macOS: doom-app/target/dist/installer/DoomJava-1.0.0.dmg
-# Windows: add -Ddist.jpackage.type=msi (needs the WiX Toolset); Linux: an app-image directory
+# Windows: doom-app/target/dist/installer/DoomJava-1.0.0.exe (needs the WiX Toolset); Linux: an app-image directory
 ```
 
 The profile links a runtime image with `maven-jlink-plugin` (the JDK modules the game needs plus the game's own
 modules) and wraps it with `jpackage`. The macOS launcher already carries `-XstartOnFirstThread` and the native-access
-flags. Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`, which builds the installers, the portable zips and
+flags. The options that differ per OS (license, Windows install folder dialog, shortcuts, `.wad` association) are in
+`doom-app/src/dist/jpackage/*.args`. Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`, which builds the installers, the portable zips and
 the fat jar zips (all with `doom1.wad`) on every OS, and `.github/workflows/docker.yml`, which publishes the multi-arch
 image to `ghcr.io/<owner>/<repo>`.
 

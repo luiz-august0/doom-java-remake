@@ -36,9 +36,10 @@
         target/doom-java-<version>-all.jar   fat jar for developers: java [-XstartOnFirstThread] -jar ...
         target/dist/runtime                  jlink runtime image (JDK modules only)
         target/dist/mods                     application + LWJGL jars (module path)
-        target/dist/installer/               jpackage output (.dmg on macOS, .msi on Windows, app-image on Linux)
+        target/dist/installer/               jpackage output (.dmg on macOS, .exe on Windows, app-image on Linux)
+        target/dist/app-image/               Windows only: DoomJava.exe app-image for the portable zip
         target/dist/app-content/iwads        the shareware doom1.wad that jpackage embeds in the application (ADR-023)
-        target/dist/portable/                zip per OS: jlink image + iwads/doom1.wad + launcher; and the fat jar zip
+        target/dist/portable/                zip per OS: jlink image (Windows: the app-image) + iwads/doom1.wad + launcher; and the fat jar zip
       The tests are not run by this profile; run them first (verify without -Pdist).
     -->
     <profile>
@@ -229,12 +230,49 @@
                     <argument>--enable-native-access=org.lwjgl,org.lwjgl.glfw,org.lwjgl.opengl</argument>
                     <argument>--app-content</argument>
                     <argument>${project.build.directory}/dist/app-content/iwads</argument>
-                    <!-- The license file only for installer types (dmg, msi): app-image rejects it, so Linux repeats
-                         an option that is valid everywhere (jpackage accepts repeated options). -->
-                    <argument>${dist.jpackage.extra.opt}</argument>
-                    <argument>${dist.jpackage.extra.val}</argument>
+                    <!-- Options of one OS (license file for dmg/exe, Windows install directory chooser, shortcuts,
+                         .wad association): src/dist/jpackage/*.args, chosen by dist.jpackage.argfile. -->
+                    <argument>@${dist.jpackage.argfile}</argument>
                     <argument>--dest</argument>
                     <argument>${project.build.directory}/dist/installer</argument>
+                  </arguments>
+                  <workingDirectory>${project.basedir}</workingDirectory>
+                </configuration>
+              </execution>
+              <!-- Windows only: the same application as an app-image (DoomJava.exe + runtime), which make-portable.sh
+                   puts in the portable zip. -Ddist.jpackage.appimage.skip=false builds it elsewhere too. -->
+              <execution>
+                <id>jpackage-app-image</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>exec</goal>
+                </goals>
+                <configuration>
+                  <skip>${dist.jpackage.appimage.skip}</skip>
+                  <executable>${dist.jpackage.exe}</executable>
+                  <arguments>
+                    <argument>--type</argument>
+                    <argument>app-image</argument>
+                    <argument>--name</argument>
+                    <argument>${dist.app.name}</argument>
+                    <argument>--app-version</argument>
+                    <argument>${dist.app.version}</argument>
+                    <argument>--vendor</argument>
+                    <argument>${dist.app.vendor}</argument>
+                    <argument>--description</argument>
+                    <argument>${project.parent.description}</argument>
+                    <argument>--runtime-image</argument>
+                    <argument>${project.build.directory}/dist/runtime/classifiers/runtime</argument>
+                    <argument>--module</argument>
+                    <argument>doom.app/doom.app.Main</argument>
+                    <argument>--java-options</argument>
+                    <argument>${dist.jvm.first.thread}</argument>
+                    <argument>--java-options</argument>
+                    <argument>--enable-native-access=org.lwjgl,org.lwjgl.glfw,org.lwjgl.opengl</argument>
+                    <argument>--app-content</argument>
+                    <argument>${project.build.directory}/dist/app-content/iwads</argument>
+                    <argument>--dest</argument>
+                    <argument>${project.build.directory}/dist/app-image</argument>
                   </arguments>
                 </configuration>
               </execution>

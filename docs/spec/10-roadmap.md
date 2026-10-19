@@ -78,7 +78,7 @@ In the order of [03 §11](03-simulation.md#11-suggested-implementation-order):
 
 ## M7 — Distribution v1.0
 
-- `maven-jlink-plugin` + `jpackage`: `.dmg` (arm64 and x64), `.msi`, `.deb`/`.tar.gz`; icon and metadata.
+- `maven-jlink-plugin` + `jpackage`: `.dmg` (arm64 and x64), `.exe`, `.deb`/`.tar.gz`; icon and metadata.
 - Gamepad, finished options menu, friendly error messages (IWAD not found, etc.).
 - User README (where to put the IWAD, how to get Freedoom), `NOTICE` with credits to id Software and Chocolate Doom.
 

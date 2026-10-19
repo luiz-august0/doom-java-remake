@@ -272,6 +272,12 @@ Notes from W3-A:
 | D-171 | Interpolation | none | `doom.render.Interpolation` decorators over the views: actor position and angle, sector floor and ceiling heights, scrolling wall offsets, psprite offsets, eye height. Steps larger than any real motion (sectors 32 units, scrollers 16, psprites 48, eye height 32) are not interpolated, because the simulation does not snap the previous values of a new level or a loaded game | ADR-011; presentation only, the simulation is untouched (demos stay in sync) | spec 04 section 7 |
 | D-172 | Render pipeline settings | n/a | `render.precisionFixes` and `video.aspectCorrection` are read by the render adapter every frame | spec 04 sections 2, 3 |  |
 
+## W6-R: see the source file
+
+| ID | Area | Original | Ours | Reason | Reference |
+|----|------|----------|------|--------|-----------|
+| D-173 | Loose files on the command line | `M_AddLooseFiles` (Windows drag and drop): only when every argument is an absolute Windows path (drive or UNC); the IWAD is chosen by file name (`D_IsIWADName`) | `LooseFiles`: the arguments before the first parameter, on every OS; a `.wad` is the IWAD when its header says `IWAD`; `.wad` → `-merge`, `.deh`/`.bex` → `-deh`, `.lmp` → `-playdemo`; the parameters are appended, so explicit ones win | The file association of the Windows installer and dropping a file on a launcher pass relative or Unix paths too; a renamed IWAD is still found | m_argv.c:M_AddLooseFiles |
+
 ## W0-OR: oracle notes
 
 Notes for the orchestrator and for whoever consumes the oracle output (not game divergences).

@@ -4,6 +4,7 @@ import doom.engine.DoomEngine;
 import doom.engine.EngineParams;
 import doom.engine.cli.CommandLine;
 import doom.engine.cli.LaunchOptions;
+import doom.engine.cli.LooseFiles;
 import doom.engine.config.Config;
 import doom.engine.config.DataDirs;
 import doom.engine.config.Settings;
@@ -14,6 +15,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -33,7 +35,7 @@ public final class Main {
 
     /** Runs the game and returns the process exit status. */
     public static int run(String[] args) {
-        LaunchOptions options = LaunchOptions.parse(CommandLine.of(args));
+        LaunchOptions options = LaunchOptions.parse(CommandLine.of(LooseFiles.expand(List.of(args))));
         if (options.help()) {
             System.out.print(LaunchOptions.usage());
             return 0;

@@ -1,0 +1,7 @@
+--license-file ../LICENSE
+--win-dir-chooser
+--win-menu
+--win-menu-group DoomJava
+--win-shortcut
+--win-upgrade-uuid a8235016-c91c-482f-b78f-472be50838ca
+--file-associations src/dist/jpackage/wad.properties
