@@ -1,12 +1,14 @@
 package doom.lint;
 
 import com.sun.source.util.JavacTask;
+import java.lang.reflect.Method;
 import java.util.Set;
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.ProcessingEnvironment;
 import javax.annotation.processing.RoundEnvironment;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.TypeElement;
+import javax.tools.Diagnostic;
 
 /**
  * Starts the {@link BamLintPlugin} checks from an annotation processor, for builds that can only pass a class-path
@@ -15,6 +17,10 @@ import javax.lang.model.element.TypeElement;
  * generates nothing; it only registers the plugin's task listener on the current javac task.
  *
  * <p>Option: {@code -Adoom.lint.mode=warn} reports warnings instead of errors.
+ *
+ * <p>IntelliJ IDEA's build (JPS) wraps the processing environment, which {@link JavacTask#instance} rejects: the
+ * wrapper is unwrapped the way JetBrains documents, and when the javac task still cannot be reached the checks are
+ * skipped with a note instead of failing the build (Maven and CI still run them).
  */
 public final class BamLintProcessor extends AbstractProcessor {
 
@@ -46,7 +52,27 @@ public final class BamLintProcessor extends AbstractProcessor {
             default -> throw new IllegalArgumentException(
                     BamLintPlugin.NAME + ": unknown " + MODE_OPTION + " '" + mode + "' (supported: error, warn)");
         };
-        BamLintPlugin.install(JavacTask.instance(processingEnv), args);
+        JavacTask task;
+        try {
+            task = JavacTask.instance(unwrap(processingEnv));
+        } catch (IllegalArgumentException e) {
+            processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE, BamLintPlugin.NAME
+                    + ": not a javac task (" + processingEnv.getClass().getName() + "), checks skipped");
+            return;
+        }
+        BamLintPlugin.install(task, args);
+    }
+
+    /** The javac environment behind IntelliJ IDEA's wrapper ({@code org.jetbrains.jps.javac.APIWrappers}), else {@code env}. */
+    static ProcessingEnvironment unwrap(ProcessingEnvironment env) {
+        try {
+            Class<?> wrappers = env.getClass().getClassLoader().loadClass("org.jetbrains.jps.javac.APIWrappers");
+            Method unwrap = wrappers.getDeclaredMethod("unwrap", Class.class, Object.class);
+            Object unwrapped = unwrap.invoke(null, ProcessingEnvironment.class, env);
+            return unwrapped instanceof ProcessingEnvironment p ? p : env;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            return env;
+        }
     }
 
     @Override
